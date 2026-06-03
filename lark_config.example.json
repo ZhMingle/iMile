@@ -3,14 +3,98 @@
   "app_secret": "your_lark_app_secret",
   "messages": [
     {
+      "name": "Click'N Code",
+      "webhook": "",
+      "secret": "",
+      "image": "output/supplier/Click'N Code.png"
+    },
+    {
+      "name": "EMPIRE COURIER",
+      "webhook": "",
+      "secret": "",
+      "image": "output/supplier/EMPIRE COURIER.png"
+    },
+    {
+      "name": "Fast donkey",
+      "webhook": "",
+      "secret": "",
+      "image": "output/supplier/Fast donkey.png"
+    },
+    {
+      "name": "Fast Rabbit",
+      "webhook": "",
+      "secret": "",
+      "image": "output/supplier/Fast Rabbit.png"
+    },
+    {
+      "name": "Feng",
+      "webhook": "",
+      "secret": "",
+      "image": "output/supplier/Feng.png"
+    },
+    {
+      "name": "Goose",
+      "webhook": "",
+      "secret": "",
+      "image": "output/supplier/Goose.png"
+    },
+    {
+      "name": "Maximage",
+      "webhook": "",
+      "secret": "",
+      "image": "output/supplier/Maximage.png"
+    },
+    {
+      "name": "PANDA",
+      "webhook": "",
+      "secret": "",
+      "image": "output/supplier/PANDA.png"
+    },
+    {
       "name": "SAFE",
-      "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/your-webhook-id",
+      "webhook": "",
       "secret": "",
       "image": "output/supplier/SAFE.png"
     },
     {
+      "name": "HMT各线路预测",
+      "webhook": "",
+      "secret": "",
+      "image": "output/province/HMT各线路预测.png"
+    },
+    {
+      "name": "NPL_HST各线路预测",
+      "webhook": "",
+      "secret": "",
+      "image": "output/province/NPL_HST各线路预测.png"
+    },
+    {
+      "name": "RTR各线路预测",
+      "webhook": "",
+      "secret": "",
+      "image": "output/province/RTR各线路预测.png"
+    },
+    {
+      "name": "TRG各线路预测",
+      "webhook": "",
+      "secret": "",
+      "image": "output/province/TRG各线路预测.png"
+    },
+    {
+      "name": "WGR各线路预测",
+      "webhook": "",
+      "secret": "",
+      "image": "output/province/WGR各线路预测.png"
+    },
+    {
+      "name": "WLT各线路预测",
+      "webhook": "",
+      "secret": "",
+      "image": "output/province/WLT各线路预测.png"
+    },
+    {
       "name": "非奥克兰总览",
-      "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/your-webhook-id",
+      "webhook": "",
       "secret": "",
       "image": "output/province/非奥克兰总览.png"
     }
