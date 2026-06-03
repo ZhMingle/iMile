@@ -1,7 +1,7 @@
-6月03日奥克兰分单 - Maximage
+6月04日奥克兰分单 - Maximage
 
 Route Code | Quantity
-601 A | 21
-602 | 57
+601 A | 1
+602 | 9
 
-总计 | 78
+总计 | 10

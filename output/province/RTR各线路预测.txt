@@ -1,7 +1,7 @@
-6月03日RTR各线路预测
+6月04日RTR各线路预测
 
 Route Code | Quantity
-RTR1 | 214
-RTR2 | 189
+RTR1 | 56
+RTR2 | 69
 
-总计 | 403
+总计 | 125

@@ -1,13 +1,13 @@
-6月03日NPL_HST各线路预测
+6月04日NPL_HST各线路预测
 
 Route Code | Quantity
-NPL01 | 111
-NPL01A | 47
-NPL02 | 157
-NPL02A | 120
+NPL01 | 38
+NPL01A | 7
+NPL02 | 40
+NPL02A | 36
 NPL03 | 0
 NPL04 | 0
 NPL05 | 0
-HST | 306
+HST | 113
 
-总计 | 741
+总计 | 234

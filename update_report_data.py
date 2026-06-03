@@ -12,8 +12,8 @@ from openpyxl import load_workbook
 
 
 SOURCE_PATTERN = "*中心运单查询*.xlsx"
-TEMPLATE_FILE = Path("05-26版本.xlsx")
-OUTPUT_FILE = Path("output/05-26版本_自动更新.xlsx")
+TEMPLATE_PATTERN = "06-03当日数据统计*.xlsx"
+OUTPUT_FILE = Path("06-03当日数据统计.xlsx")
 today = datetime.now()
 REPORT_DATE = f"{today.month}月{today.day:02d}日"
 
@@ -57,6 +57,17 @@ def find_latest_source_file():
 
     details = "; ".join(f"{path}: missing {missing}" for path, missing in skipped)
     raise ValueError(f"No valid source file found matching {SOURCE_PATTERN}. {details}")
+
+
+def find_latest_template_file():
+    files = [
+        path
+        for path in Path(".").glob(TEMPLATE_PATTERN)
+        if not path.name.startswith("~$")
+    ]
+    if not files:
+        raise FileNotFoundError(f"No template file found matching {TEMPLATE_PATTERN}")
+    return max(files, key=lambda path: path.stat().st_mtime)
 
 
 def read_source_xlsx(path):
@@ -210,14 +221,19 @@ def write_data_source(wb, df):
     if missing:
         raise ValueError(f"{SOURCE_SHEET} is missing columns: {missing}")
 
-    if ws.max_row > 1:
-        clear_range(ws, 2, ws.max_row, 1, ws.max_column)
+    old_max_row = ws.max_row
+    if old_max_row > 1:
+        clear_range(ws, 2, old_max_row, 1, ws.max_column)
 
     for index, row in df.iterrows():
         excel_row = index + 2
         ws.cell(excel_row, header_to_col["运单号"]).value = row["运单号"]
         ws.cell(excel_row, header_to_col["派件网点简码"]).value = row["派件网点简码"]
         ws.cell(excel_row, header_to_col["路由码"]).value = row["路由码"]
+
+    first_extra_row = len(df) + 2
+    if old_max_row >= first_extra_row:
+        ws.delete_rows(first_extra_row, old_max_row - first_extra_row + 1)
 
 
 def find_total_row(ws, column=1, label="总计"):
@@ -358,7 +374,7 @@ def write_total_breakdown(ws, auckland_total, non_auckland_total):
     header_cell = ws.cell(13, 6)
     value_cell = ws.cell(14, 6)
     header_cell.value = "当天总量（奥克兰 + 外省）"
-    value_cell.value = f"{total}（{auckland_total} + {non_auckland_total}）"
+    value_cell.value = f"{total}({auckland_total}+{non_auckland_total})"
 
     for attr, style in header_style.items():
         setattr(header_cell, attr, copy(style))
@@ -425,7 +441,9 @@ def main():
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        wb = load_workbook(TEMPLATE_FILE, keep_links=False)
+        template_file = find_latest_template_file()
+        print(f"Using template file: {template_file}")
+        wb = load_workbook(template_file, keep_links=False)
 
     write_data_source(wb, df)
     rebuild_non_auckland_pivot(wb, station_counts)

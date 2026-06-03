@@ -167,11 +167,6 @@ def main():
         print("Run with --send when you are ready.")
         return
 
-    confirm = input("\nType SEND to upload images and send to Lark: ").strip()
-    if confirm != "SEND":
-        print("Cancelled.")
-        return
-
     tenant_access_token = get_tenant_access_token(config["app_id"], config["app_secret"])
 
     image_key_cache = {}

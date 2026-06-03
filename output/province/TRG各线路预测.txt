@@ -1,11 +1,11 @@
-6月03日TRG各线路预测
+6月04日TRG各线路预测
 
 Route Code | Quantity
-TRG1 | 282
-TRG2 | 405
-TRG3 | 380
+TRG1 | 72
+TRG2 | 114
+TRG3 | 111
 TRG04 | 0
 TRG08 | 0
 TRG10 | 0
 
-总计 | 1067
+总计 | 297

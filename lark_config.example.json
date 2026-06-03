@@ -3,10 +3,16 @@
   "app_secret": "your_lark_app_secret",
   "messages": [
     {
-      "name": "SAFE supplier group",
+      "name": "SAFE",
       "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/your-webhook-id",
       "secret": "",
-      "image": "output/images/supplier/SAFE.png"
+      "image": "output/supplier/SAFE.png"
+    },
+    {
+      "name": "非奥克兰总览",
+      "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/your-webhook-id",
+      "secret": "",
+      "image": "output/province/非奥克兰总览.png"
     }
   ]
 }

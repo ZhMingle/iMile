@@ -18,17 +18,16 @@ REPORT_FILES = sorted(
 UPDATED_REPORT_FILES = sorted(
     [
         path
-        for path in Path("output").glob("05-26版本_自动更新*.xlsx")
+        for path in Path("output").glob("06-03当日数据统计*.xlsx")
         if not path.name.startswith("~$")
     ],
     key=lambda path: path.stat().st_mtime,
 )
-REPORT_FILE = REPORT_FILES[-1] if REPORT_FILES else (UPDATED_REPORT_FILES[-1] if UPDATED_REPORT_FILES else Path("05-26版本.xlsx"))
+REPORT_FILE = REPORT_FILES[-1] if REPORT_FILES else (UPDATED_REPORT_FILES[-1] if UPDATED_REPORT_FILES else Path("06-03当日数据统计.xlsx"))
 OUTPUT_DIR = Path("output")
 SUPPLIER_DIR = OUTPUT_DIR / "supplier"
 PROVINCE_DIR = OUTPUT_DIR / "province"
-IMAGE_DIR = OUTPUT_DIR / "images"
-SCALE = 2
+SCALE = 3
 today = datetime.now()
 REPORT_DATE = f"{today.month}月{today.day:02d}日"
 
@@ -108,6 +107,21 @@ def draw_centered_text(draw, box, text, font, fill=BLACK):
     draw.text((x1 + (x2 - x1 - width) / 2, y1 + (y2 - y1 - height) / 2 - 1), text, font=font, fill=fill)
 
 
+def draw_centered_fit_text(draw, box, text, font_size, bold=False, fill=BLACK, min_size=14, padding=10):
+    text = format_display(text)
+    x1, y1, x2, y2 = [value * SCALE for value in box]
+    max_width = x2 - x1 - padding * 2 * SCALE
+    max_height = y2 - y1 - padding * SCALE
+    size = font_size
+    while size >= min_size:
+        font = load_font(size, bold=bold)
+        width, height = text_size(draw, text, font)
+        if width <= max_width and height <= max_height:
+            break
+        size -= 1
+    draw.text((x1 + (x2 - x1 - width) / 2, y1 + (y2 - y1 - height) / 2 - 1), text, font=font, fill=fill)
+
+
 def draw_left_text(draw, box, text, font, fill=BLACK, padding=8):
     text = format_display(text)
     x1, y1, x2, y2 = [value * SCALE for value in box]
@@ -132,7 +146,7 @@ def render_table_image(path, title, headers, rows, widths, title_fill=BLUE, head
 
     y = margin
     rect(draw, [margin, y, width - margin - 1, y + title_h], fill=title_fill, outline=BLACK, width=SCALE)
-    draw_centered_text(draw, (margin, y, width - margin, y + title_h), title, FONT_TITLE)
+    draw_centered_fit_text(draw, (margin, y, width - margin, y + title_h), title, 28, bold=True)
     y += title_h
 
     x = margin
@@ -183,18 +197,18 @@ def render_route_image(path, title, detail):
         title=title,
         headers=["Route Code", "Quantity"],
         rows=rows,
-        widths=[170, 170],
+        widths=[300, 220],
         title_fill=YELLOW,
         header_fill=WHITE,
     )
 
 
 def render_side_by_side_route_image(path, tables):
-    title_h = 42
-    row_h = 28
-    gap = 96
-    table_w = 340
-    widths = [170, 170]
+    title_h = 54
+    row_h = 34
+    gap = 120
+    table_w = 520
+    widths = [300, 220]
     max_rows = max(len(detail) + 1 for _, detail in tables)
     height = title_h + row_h * max_rows
     width = table_w * len(tables) + gap * (len(tables) - 1)
@@ -205,7 +219,7 @@ def render_side_by_side_route_image(path, tables):
     for table_index, (title, detail) in enumerate(tables):
         x0 = table_index * (table_w + gap)
         rect(draw, [x0, 0, x0 + table_w, title_h], fill=YELLOW, outline=BLACK, width=SCALE)
-        draw_centered_text(draw, (x0, 0, x0 + table_w, title_h), title, FONT_HEADER)
+        draw_centered_fit_text(draw, (x0, 0, x0 + table_w, title_h), title, 20, bold=True)
 
         y = title_h
         rows = [[row.route_code, row.quantity] for row in detail.itertuples(index=False)]
@@ -322,7 +336,7 @@ def build_supplier_messages():
         write_text(SUPPLIER_DIR / f"{safe_name}.txt", "\n".join(lines))
 
         group.to_csv(SUPPLIER_DIR / f"{safe_name}.csv", index=False, encoding="utf-8-sig")
-        render_supplier_image(IMAGE_DIR / "supplier" / f"{safe_name}.png", supplier, group)
+        render_supplier_image(SUPPLIER_DIR / f"{safe_name}.png", supplier, group)
         summary.append({"supplier": supplier, "routes": len(group), "total": total})
 
     return pd.DataFrame(summary)
@@ -391,7 +405,7 @@ def build_non_auckland_messages():
     board_3l.to_csv(PROVINCE_DIR / "3L预测板数.csv", index=False, encoding="utf-8-sig")
     board_5l.to_csv(PROVINCE_DIR / "5L预测板数.csv", index=False, encoding="utf-8-sig")
     render_non_auckland_overview(
-        IMAGE_DIR / "province" / "非奥克兰总览.png",
+        PROVINCE_DIR / "非奥克兰总览.png",
         overview,
         board_3l,
         board_5l,
@@ -435,16 +449,7 @@ def build_route_detail_messages():
 
         write_text(PROVINCE_DIR / f"{name}各线路预测.txt", "\n".join(lines))
         detail.to_csv(PROVINCE_DIR / f"{name}各线路预测.csv", index=False, encoding="utf-8-sig")
-        render_route_image(IMAGE_DIR / "province" / f"{name}各线路预测.png", f"{REPORT_DATE}{name}各线路预测", detail)
-
-    render_side_by_side_route_image(
-        IMAGE_DIR / "province" / "RTR_TRG各线路预测.png",
-        [
-            (f"{REPORT_DATE}RTR各线路预测", details_by_name["RTR"]),
-            (f"{REPORT_DATE}TRG各线路预测", details_by_name["TRG"]),
-        ],
-    )
-
+        render_route_image(PROVINCE_DIR / f"{name}各线路预测.png", f"{REPORT_DATE}{name}各线路预测", detail)
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
