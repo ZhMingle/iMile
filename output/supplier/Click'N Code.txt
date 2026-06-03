@@ -1,7 +1,7 @@
 6月03日奥克兰分单 - Click'N Code
 
 Route Code | Quantity
-203 | 35
+203 | 34
 203 A | 75
 203 B | 45
 206 | 37
@@ -15,4 +15,4 @@ Route Code | Quantity
 405 D | 54
 603 | 76
 
-总计 | 688
+总计 | 687

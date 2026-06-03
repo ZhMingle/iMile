@@ -7,8 +7,23 @@ from openpyxl import load_workbook
 from PIL import Image, ImageDraw, ImageFont
 
 
-UPDATED_REPORT_FILES = sorted(Path("output").glob("05-26版本_自动更新*.xlsx"), key=lambda path: path.stat().st_mtime)
-REPORT_FILE = UPDATED_REPORT_FILES[-1] if UPDATED_REPORT_FILES else Path("05-26版本.xlsx")
+REPORT_FILES = sorted(
+    [
+        path
+        for path in Path(".").glob("06-03*.xlsx")
+        if not path.name.startswith("~$")
+    ],
+    key=lambda path: path.stat().st_mtime,
+)
+UPDATED_REPORT_FILES = sorted(
+    [
+        path
+        for path in Path("output").glob("05-26版本_自动更新*.xlsx")
+        if not path.name.startswith("~$")
+    ],
+    key=lambda path: path.stat().st_mtime,
+)
+REPORT_FILE = REPORT_FILES[-1] if REPORT_FILES else (UPDATED_REPORT_FILES[-1] if UPDATED_REPORT_FILES else Path("05-26版本.xlsx"))
 OUTPUT_DIR = Path("output")
 SUPPLIER_DIR = OUTPUT_DIR / "supplier"
 PROVINCE_DIR = OUTPUT_DIR / "province"
