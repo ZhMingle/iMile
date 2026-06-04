@@ -6,7 +6,7 @@ import pandas as pd
 
 
 INPUT_FOLDER = Path("input")
-OUTPUT_FILE = Path("output/query_list.xlsx")
+OUTPUT_FILE = Path("output/query_list.txt")
 
 
 def find_column(columns, keyword):
@@ -89,11 +89,11 @@ copy_to_clipboard(result["TrakingNo&BillNumber"].tolist())
 OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 try:
-    result.to_excel(OUTPUT_FILE, index=False)
+    OUTPUT_FILE.write_text("\n".join(result["TrakingNo&BillNumber"]) + "\n", encoding="utf-8")
 except PermissionError:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     OUTPUT_FILE = OUTPUT_FILE.with_name(f"{OUTPUT_FILE.stem}_{timestamp}{OUTPUT_FILE.suffix}")
-    result.to_excel(OUTPUT_FILE, index=False)
+    OUTPUT_FILE.write_text("\n".join(result["TrakingNo&BillNumber"]) + "\n", encoding="utf-8")
     print("Default output file is open or locked; wrote a new file instead.")
 
 print(f"Total unique records: {len(result)}")

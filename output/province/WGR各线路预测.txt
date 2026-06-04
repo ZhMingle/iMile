@@ -1,7 +1,0 @@
-6月04日WGR各线路预测
-
-Route Code | Quantity
-WGR01 | 51
-WGR03 | 74
-
-总计 | 125

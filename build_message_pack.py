@@ -10,7 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 REPORT_FILES = sorted(
     [
         path
-        for path in Path(".").glob("06-03*.xlsx")
+        for path in Path(".").glob("*当日数据统计*.xlsx")
         if not path.name.startswith("~$")
     ],
     key=lambda path: path.stat().st_mtime,
@@ -18,16 +18,16 @@ REPORT_FILES = sorted(
 UPDATED_REPORT_FILES = sorted(
     [
         path
-        for path in Path("output").glob("06-03当日数据统计*.xlsx")
+        for path in Path("output").glob("当日数据统计*.xlsx")
         if not path.name.startswith("~$")
     ],
     key=lambda path: path.stat().st_mtime,
 )
-REPORT_FILE = REPORT_FILES[-1] if REPORT_FILES else (UPDATED_REPORT_FILES[-1] if UPDATED_REPORT_FILES else Path("06-03当日数据统计.xlsx"))
+REPORT_FILE = REPORT_FILES[-1] if REPORT_FILES else (UPDATED_REPORT_FILES[-1] if UPDATED_REPORT_FILES else Path("当日数据统计.xlsx"))
 OUTPUT_DIR = Path("output")
 SUPPLIER_DIR = OUTPUT_DIR / "supplier"
 PROVINCE_DIR = OUTPUT_DIR / "province"
-SCALE = 3
+SCALE = 2.5
 today = datetime.now()
 REPORT_DATE = f"{today.month}月{today.day:02d}日"
 
@@ -47,7 +47,7 @@ def load_font(size, bold=False):
     ]
     for path in candidates:
         if path.exists():
-            return ImageFont.truetype(str(path), size * SCALE)
+            return ImageFont.truetype(str(path), int(size * SCALE))
     return ImageFont.load_default()
 
 
@@ -83,15 +83,22 @@ def parse_total_breakdown(value, province_count):
     return 0, 0, province_count
 
 
-def write_text(path, text):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
 def text_size(draw, text, font):
     text = format_display(text)
     box = draw.textbbox((0, 0), text, font=font)
     return box[2] - box[0], box[3] - box[1]
+
+
+def px(value):
+    return int(round(value * SCALE))
+
+
+def scaled_box(values):
+    return [px(value) for value in values]
+
+
+def line_width():
+    return max(1, int(round(SCALE)))
 
 
 def format_display(value):
@@ -102,16 +109,16 @@ def format_display(value):
 
 def draw_centered_text(draw, box, text, font, fill=BLACK):
     text = format_display(text)
-    x1, y1, x2, y2 = [value * SCALE for value in box]
+    x1, y1, x2, y2 = scaled_box(box)
     width, height = text_size(draw, text, font)
     draw.text((x1 + (x2 - x1 - width) / 2, y1 + (y2 - y1 - height) / 2 - 1), text, font=font, fill=fill)
 
 
 def draw_centered_fit_text(draw, box, text, font_size, bold=False, fill=BLACK, min_size=14, padding=10):
     text = format_display(text)
-    x1, y1, x2, y2 = [value * SCALE for value in box]
-    max_width = x2 - x1 - padding * 2 * SCALE
-    max_height = y2 - y1 - padding * SCALE
+    x1, y1, x2, y2 = scaled_box(box)
+    max_width = x2 - x1 - px(padding * 2)
+    max_height = y2 - y1 - px(padding)
     size = font_size
     while size >= min_size:
         font = load_font(size, bold=bold)
@@ -124,13 +131,13 @@ def draw_centered_fit_text(draw, box, text, font_size, bold=False, fill=BLACK, m
 
 def draw_left_text(draw, box, text, font, fill=BLACK, padding=8):
     text = format_display(text)
-    x1, y1, x2, y2 = [value * SCALE for value in box]
+    x1, y1, x2, y2 = scaled_box(box)
     _, height = text_size(draw, text, font)
-    draw.text((x1 + padding * SCALE, y1 + (y2 - y1 - height) / 2 - 1), text, font=font, fill=fill)
+    draw.text((x1 + px(padding), y1 + (y2 - y1 - height) / 2 - 1), text, font=font, fill=fill)
 
 
 def rect(draw, coords, **kwargs):
-    draw.rectangle([value * SCALE for value in coords], **kwargs)
+    draw.rectangle(scaled_box(coords), **kwargs)
 
 
 def render_table_image(path, title, headers, rows, widths, title_fill=BLUE, header_fill=LIGHT_BLUE):
@@ -141,17 +148,17 @@ def render_table_image(path, title, headers, rows, widths, title_fill=BLUE, head
     width = sum(widths) + margin * 2
     height = title_h + header_h + row_h * len(rows) + margin * 2
 
-    image = Image.new("RGB", (width * SCALE, height * SCALE), WHITE)
+    image = Image.new("RGB", (px(width), px(height)), WHITE)
     draw = ImageDraw.Draw(image)
 
     y = margin
-    rect(draw, [margin, y, width - margin - 1, y + title_h], fill=title_fill, outline=BLACK, width=SCALE)
+    rect(draw, [margin, y, width - margin - 1, y + title_h], fill=title_fill, outline=BLACK, width=line_width())
     draw_centered_fit_text(draw, (margin, y, width - margin, y + title_h), title, 28, bold=True)
     y += title_h
 
     x = margin
     for header, col_w in zip(headers, widths):
-        rect(draw, [x, y, x + col_w, y + header_h], fill=header_fill, outline=BLACK, width=SCALE)
+        rect(draw, [x, y, x + col_w, y + header_h], fill=header_fill, outline=BLACK, width=line_width())
         draw_centered_text(draw, (x, y, x + col_w, y + header_h), header, FONT_HEADER)
         x += col_w
     y += header_h
@@ -161,7 +168,7 @@ def render_table_image(path, title, headers, rows, widths, title_fill=BLUE, head
         x = margin
         for idx, (value, col_w) in enumerate(zip(row, widths)):
             fill = TOTAL_BLUE if is_total else WHITE
-            rect(draw, [x, y, x + col_w, y + row_h], fill=fill, outline=BLACK, width=SCALE)
+            rect(draw, [x, y, x + col_w, y + row_h], fill=fill, outline=BLACK, width=line_width())
             font = FONT_BODY_BOLD if is_total else FONT_BODY
             if idx == 0:
                 draw_centered_text(draw, (x, y, x + col_w, y + row_h), value, font)
@@ -213,12 +220,12 @@ def render_side_by_side_route_image(path, tables):
     height = title_h + row_h * max_rows
     width = table_w * len(tables) + gap * (len(tables) - 1)
 
-    image = Image.new("RGB", (width * SCALE, height * SCALE), WHITE)
+    image = Image.new("RGB", (px(width), px(height)), WHITE)
     draw = ImageDraw.Draw(image)
 
     for table_index, (title, detail) in enumerate(tables):
         x0 = table_index * (table_w + gap)
-        rect(draw, [x0, 0, x0 + table_w, title_h], fill=YELLOW, outline=BLACK, width=SCALE)
+        rect(draw, [x0, 0, x0 + table_w, title_h], fill=YELLOW, outline=BLACK, width=line_width())
         draw_centered_fit_text(draw, (x0, 0, x0 + table_w, title_h), title, 20, bold=True)
 
         y = title_h
@@ -228,8 +235,8 @@ def render_side_by_side_route_image(path, tables):
         for route_code, quantity in rows:
             is_total = route_code == "总计"
             fill = TOTAL_BLUE if is_total else WHITE
-            rect(draw, [x0, y, x0 + widths[0], y + row_h], fill=fill if is_total else WHITE, outline=BLACK, width=SCALE)
-            rect(draw, [x0 + widths[0], y, x0 + table_w, y + row_h], fill=fill, outline=BLACK, width=SCALE)
+            rect(draw, [x0, y, x0 + widths[0], y + row_h], fill=fill if is_total else WHITE, outline=BLACK, width=line_width())
+            rect(draw, [x0 + widths[0], y, x0 + table_w, y + row_h], fill=fill, outline=BLACK, width=line_width())
             font = FONT_BODY_BOLD if is_total else FONT_BODY
             draw_centered_text(draw, (x0, y, x0 + widths[0], y + row_h), route_code, font)
             draw_centered_text(draw, (x0 + widths[0], y, x0 + table_w, y + row_h), quantity, font)
@@ -248,17 +255,17 @@ def render_non_auckland_overview(path, overview, board_3l, board_5l, aliexpress_
     side_widths = [100, 190]
     width = sum(main_widths) + gap + sum(side_widths)
     height = 840
-    image = Image.new("RGB", (width * SCALE, height * SCALE), WHITE)
+    image = Image.new("RGB", (px(width), px(height)), WHITE)
     draw = ImageDraw.Draw(image)
 
     x0, y0 = 0, 0
     main_w = sum(main_widths)
-    rect(draw, [x0, y0, x0 + main_w, y0 + title_h], fill=BLUE, outline=BLACK, width=SCALE)
+    rect(draw, [x0, y0, x0 + main_w, y0 + title_h], fill=BLUE, outline=BLACK, width=line_width())
     draw_centered_text(draw, (x0, y0, x0 + main_w, y0 + title_h), f"{REPORT_DATE}非奥克兰到件货量", FONT_TITLE)
     y = y0 + title_h
     x = x0
     for header, col_w in zip(["派件网点", "到件货量", "外省菜鸟到货量"], main_widths):
-        rect(draw, [x, y, x + col_w, y + header_h], fill=LIGHT_BLUE, outline=BLACK, width=SCALE)
+        rect(draw, [x, y, x + col_w, y + header_h], fill=LIGHT_BLUE, outline=BLACK, width=line_width())
         draw_centered_text(draw, (x, y, x + col_w, y + header_h), header, FONT_HEADER)
         x += col_w
     y += header_h
@@ -268,36 +275,36 @@ def render_non_auckland_overview(path, overview, board_3l, board_5l, aliexpress_
         is_total = row.station == "总计"
         x = x0
         for value, col_w in zip(values, main_widths):
-            rect(draw, [x, y, x + col_w, y + cell_h], fill=TOTAL_BLUE if is_total else WHITE, outline=BLACK, width=SCALE)
+            rect(draw, [x, y, x + col_w, y + cell_h], fill=TOTAL_BLUE if is_total else WHITE, outline=BLACK, width=line_width())
             draw_centered_text(draw, (x, y, x + col_w, y + cell_h), value, FONT_BODY_BOLD if is_total else FONT_BODY)
             x += col_w
         y += cell_h
 
     y += 28
     total_value_h = 52
-    rect(draw, [x0, y, x0 + main_widths[0], y + header_h], fill=LIGHT_BLUE, outline=BLACK, width=SCALE)
+    rect(draw, [x0, y, x0 + main_widths[0], y + header_h], fill=LIGHT_BLUE, outline=BLACK, width=line_width())
     draw_centered_text(draw, (x0, y, x0 + main_widths[0], y + header_h), "Aliexpress 单量", FONT_HEADER)
-    rect(draw, [x0, y + header_h, x0 + main_widths[0], y + header_h + cell_h], fill=WHITE, outline=BLACK, width=SCALE)
+    rect(draw, [x0, y + header_h, x0 + main_widths[0], y + header_h + cell_h], fill=WHITE, outline=BLACK, width=line_width())
     draw_centered_text(draw, (x0, y + header_h, x0 + main_widths[0], y + header_h + cell_h), aliexpress_count, FONT_BODY)
 
     total_x = x0 + main_widths[0] + main_widths[1]
     total_width = main_widths[2]
     total_display = f"{total_count}（{auckland_count} + {province_count}）"
-    rect(draw, [total_x, y, total_x + total_width, y + header_h], fill="#FFC000", outline=BLACK, width=SCALE)
+    rect(draw, [total_x, y, total_x + total_width, y + header_h], fill="#FFC000", outline=BLACK, width=line_width())
     draw_centered_text(draw, (total_x, y, total_x + total_width, y + header_h), "当天总量（奥克兰 + 外省）", FONT_HEADER)
-    rect(draw, [total_x, y + header_h, total_x + total_width, y + header_h + total_value_h], fill="#FFC000", outline=BLACK, width=SCALE)
+    rect(draw, [total_x, y + header_h, total_x + total_width, y + header_h + total_value_h], fill="#FFC000", outline=BLACK, width=line_width())
     draw_centered_text(draw, (total_x, y + header_h, total_x + total_width, y + header_h + total_value_h), total_display, FONT_TOTAL_NUMBER)
 
     def draw_board_table(x, y, title, data):
-        rect(draw, [x, y, x + side_widths[0], y + header_h], fill=WHITE, outline=BLACK, width=SCALE)
+        rect(draw, [x, y, x + side_widths[0], y + header_h], fill=WHITE, outline=BLACK, width=line_width())
         draw_centered_text(draw, (x, y, x + side_widths[0], y + header_h), data.iloc[0]["base"], FONT_HEADER)
-        rect(draw, [x + side_widths[0], y, x + sum(side_widths), y + header_h], fill=WHITE, outline=BLACK, width=SCALE)
+        rect(draw, [x + side_widths[0], y, x + sum(side_widths), y + header_h], fill=WHITE, outline=BLACK, width=line_width())
         draw_centered_text(draw, (x + side_widths[0], y, x + sum(side_widths), y + header_h), title, FONT_HEADER)
         y += header_h
         for row in data.itertuples(index=False):
-            rect(draw, [x, y, x + side_widths[0], y + cell_h], fill=WHITE, outline=BLACK, width=SCALE)
+            rect(draw, [x, y, x + side_widths[0], y + cell_h], fill=WHITE, outline=BLACK, width=line_width())
             draw_left_text(draw, (x, y, x + side_widths[0], y + cell_h), row.station, FONT_BODY, padding=6)
-            rect(draw, [x + side_widths[0], y, x + sum(side_widths), y + cell_h], fill=WHITE, outline=BLACK, width=SCALE)
+            rect(draw, [x + side_widths[0], y, x + sum(side_widths), y + cell_h], fill=WHITE, outline=BLACK, width=line_width())
             draw_centered_text(draw, (x + side_widths[0], y, x + sum(side_widths), y + cell_h), row.boards, FONT_BODY_BOLD if row.station == "总计" else FONT_BODY)
             y += cell_h
 
@@ -328,14 +335,8 @@ def build_supplier_messages():
     for supplier, group in rows.groupby("supplier", sort=True):
         total = int(group["quantity"].sum())
 
-        lines = [f"{REPORT_DATE}奥克兰分单 - {supplier}", "", "Route Code | Quantity"]
-        lines.extend(f"{row.route_code} | {row.quantity}" for row in group.itertuples(index=False))
-        lines.extend(["", f"总计 | {total}"])
-
         safe_name = supplier.replace("/", "_").replace("\\", "_").replace(":", "_")
-        write_text(SUPPLIER_DIR / f"{safe_name}.txt", "\n".join(lines))
 
-        group.to_csv(SUPPLIER_DIR / f"{safe_name}.csv", index=False, encoding="utf-8-sig")
         render_supplier_image(SUPPLIER_DIR / f"{safe_name}.png", supplier, group)
         summary.append({"supplier": supplier, "routes": len(group), "total": total})
 
@@ -369,41 +370,6 @@ def build_non_auckland_messages():
         total_count = clean_number(df.iloc[13, 3]) or clean_number(df.iloc[13, 5])
         auckland_count = clean_number(df.iloc[13, 4]) or total_count - province_count
 
-    lines = [
-        f"{REPORT_DATE}非奥克兰到件货量",
-        "",
-        "派件网点 | 到件货量 | 外省菜鸟到货量",
-    ]
-    lines.extend(
-        f"{row.station} | {row.arrival_volume} | {row.cainiao_volume}"
-        for row in overview.itertuples(index=False)
-        if row.station
-    )
-    lines.extend(
-        [
-            "",
-            f"Aliexpress 单量 | {aliexpress_count}",
-            f"当天总量（奥克兰 + 外省） | {total_count}（{auckland_count} + {province_count}）",
-            "",
-            "3L预测板数",
-        ]
-    )
-    lines.extend(
-        f"{row.station} | {row.boards}"
-        for row in board_3l.itertuples(index=False)
-        if row.station
-    )
-    lines.extend(["", "5L预测板数"])
-    lines.extend(
-        f"{row.station} | {row.boards}"
-        for row in board_5l.itertuples(index=False)
-        if row.station
-    )
-
-    write_text(PROVINCE_DIR / "非奥克兰总览.txt", "\n".join(lines))
-    overview.to_csv(PROVINCE_DIR / "非奥克兰到件货量.csv", index=False, encoding="utf-8-sig")
-    board_3l.to_csv(PROVINCE_DIR / "3L预测板数.csv", index=False, encoding="utf-8-sig")
-    board_5l.to_csv(PROVINCE_DIR / "5L预测板数.csv", index=False, encoding="utf-8-sig")
     render_non_auckland_overview(
         PROVINCE_DIR / "非奥克兰总览.png",
         overview,
@@ -417,8 +383,14 @@ def build_non_auckland_messages():
 
 
 def build_route_detail_messages():
-    wb = load_workbook(REPORT_FILE, data_only=True, read_only=True)
+    wb = load_workbook(REPORT_FILE, data_only=False, read_only=True)
     ws = wb["奥克兰透视"]
+    source_ws = wb["数据源1-预测"]
+    route_counts = {}
+    for (route_code,) in source_ws.iter_rows(min_row=2, min_col=2, max_col=2, values_only=True):
+        route_code = clean_text(route_code)
+        if route_code:
+            route_counts[route_code] = route_counts.get(route_code, 0) + 1
 
     ranges = {
         "WGR": (8, 9, 6, 7),
@@ -435,20 +407,17 @@ def build_route_detail_messages():
         rows = []
         for row in range(start, end + 1):
             route_code = clean_text(ws.cell(row, route_col).value)
-            quantity = clean_number(ws.cell(row, qty_col).value)
+            quantity_value = ws.cell(row, qty_col).value
+            if isinstance(quantity_value, str) and quantity_value.startswith("="):
+                quantity = route_counts.get(route_code, 0)
+            else:
+                quantity = clean_number(quantity_value)
             if route_code and route_code not in {"Route Code", "总计"}:
                 rows.append({"route_code": route_code, "quantity": quantity})
 
         detail = pd.DataFrame(rows, columns=["route_code", "quantity"])
         details_by_name[name] = detail
 
-        total = int(detail["quantity"].sum())
-        lines = [f"{REPORT_DATE}{name}各线路预测", "", "Route Code | Quantity"]
-        lines.extend(f"{row.route_code} | {row.quantity}" for row in detail.itertuples(index=False))
-        lines.extend(["", f"总计 | {total}"])
-
-        write_text(PROVINCE_DIR / f"{name}各线路预测.txt", "\n".join(lines))
-        detail.to_csv(PROVINCE_DIR / f"{name}各线路预测.csv", index=False, encoding="utf-8-sig")
         render_route_image(PROVINCE_DIR / f"{name}各线路预测.png", f"{REPORT_DATE}{name}各线路预测", detail)
 
 def main():
@@ -457,8 +426,6 @@ def main():
     supplier_summary = build_supplier_messages()
     build_non_auckland_messages()
     build_route_detail_messages()
-
-    supplier_summary.to_csv(OUTPUT_DIR / "供应商汇总.csv", index=False, encoding="utf-8-sig")
 
     print(f"Generated supplier messages: {len(supplier_summary)}")
     print(f"Done: {OUTPUT_DIR.resolve()}")

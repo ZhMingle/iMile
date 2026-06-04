@@ -2,3 +2,7 @@ __pycache__/
 *.py[cod]
 lark_config.json
 ~$*
+input/*
+!input/.gitkeep
+output/*
+!output/.gitkeep

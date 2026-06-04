@@ -12,8 +12,8 @@ from openpyxl import load_workbook
 
 
 SOURCE_PATTERN = "*中心运单查询*.xlsx"
-TEMPLATE_PATTERN = "06-03当日数据统计*.xlsx"
-OUTPUT_FILE = Path("06-03当日数据统计.xlsx")
+TEMPLATE_PATTERN = "当日数据统计*.xlsx"
+OUTPUT_FILE = Path("当日数据统计.xlsx")
 today = datetime.now()
 REPORT_DATE = f"{today.month}月{today.day:02d}日"
 
@@ -281,7 +281,7 @@ def rebuild_auckland_pivot(wb, route_counts):
     # overwrite helper cells that happen to contain route-like values.
     route_table_ranges = [
         (8, 9, 6, 7),     # WGR
-        (9, 23, 10, 11),  # HMT
+        (9, 24, 10, 11),  # HMT
         (30, 31, 7, 8),   # RTR
         (29, 34, 10, 11), # TRG
         (40, 47, 10, 11), # NPL/HST

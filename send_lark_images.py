@@ -14,6 +14,7 @@ CONFIG_FILE = Path("lark_config.json")
 TOKEN_URL = "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal"
 UPLOAD_IMAGE_URL = "https://open.larksuite.com/open-apis/im/v1/images"
 SEND_MESSAGE_URL = "https://open.larksuite.com/open-apis/im/v1/messages"
+RATE_LIMIT_CODE = 11232
 
 
 def post_json(url, payload, headers=None, timeout=20):
@@ -98,6 +99,29 @@ def send_image(webhook, image_key, secret=""):
     return data
 
 
+def send_image_with_retry(webhook, image_key, secret="", max_attempts=5):
+    waits = [10, 20, 40, 80]
+    for attempt in range(max_attempts):
+        payload = {
+            "msg_type": "image",
+            "content": {"image_key": image_key},
+        }
+        if secret:
+            timestamp = str(int(time.time()))
+            payload["timestamp"] = timestamp
+            payload["sign"] = sign(secret, timestamp)
+
+        data = post_json(webhook, payload)
+        if data.get("code") == 0:
+            return data
+        if data.get("code") == RATE_LIMIT_CODE and attempt < max_attempts - 1:
+            wait_seconds = waits[min(attempt, len(waits) - 1)]
+            print(f"Rate limited by Lark; waiting {wait_seconds}s before retry...")
+            time.sleep(wait_seconds)
+            continue
+        raise RuntimeError(f"Failed to send image: {data}")
+
+
 def send_image_to_receiver(receive_id_type, receive_id, image_key, tenant_access_token):
     url = f"{SEND_MESSAGE_URL}?receive_id_type={receive_id_type}"
     data = post_json(
@@ -112,6 +136,29 @@ def send_image_to_receiver(receive_id_type, receive_id, image_key, tenant_access
     if data.get("code") != 0:
         raise RuntimeError(f"Failed to send image to receiver: {data}")
     return data
+
+
+def send_image_to_receiver_with_retry(receive_id_type, receive_id, image_key, tenant_access_token, max_attempts=5):
+    waits = [10, 20, 40, 80]
+    for attempt in range(max_attempts):
+        url = f"{SEND_MESSAGE_URL}?receive_id_type={receive_id_type}"
+        data = post_json(
+            url,
+            {
+                "receive_id": receive_id,
+                "msg_type": "image",
+                "content": json.dumps({"image_key": image_key}, ensure_ascii=False),
+            },
+            headers={"Authorization": f"Bearer {tenant_access_token}"},
+        )
+        if data.get("code") == 0:
+            return data
+        if data.get("code") == RATE_LIMIT_CODE and attempt < max_attempts - 1:
+            wait_seconds = waits[min(attempt, len(waits) - 1)]
+            print(f"Rate limited by Lark; waiting {wait_seconds}s before retry...")
+            time.sleep(wait_seconds)
+            continue
+        raise RuntimeError(f"Failed to send image to receiver: {data}")
 
 
 def validate_messages(messages):
@@ -146,6 +193,7 @@ def main():
     parser = argparse.ArgumentParser(description="Preview or send generated PNG reports to Lark groups.")
     parser.add_argument("--config", default=str(CONFIG_FILE), help="Path to lark_config.json")
     parser.add_argument("--send", action="store_true", help="Actually upload images and send them")
+    parser.add_argument("--delay", type=float, default=3.0, help="Seconds to wait between messages")
     args = parser.parse_args()
 
     config = load_config(Path(args.config))
@@ -175,16 +223,16 @@ def main():
         if image_path not in image_key_cache:
             image_key_cache[image_path] = upload_image(image_path, tenant_access_token)
         if message.get("webhook"):
-            send_image(message["webhook"], image_key_cache[image_path], message.get("secret", ""))
+            send_image_with_retry(message["webhook"], image_key_cache[image_path], message.get("secret", ""))
         else:
-            send_image_to_receiver(
+            send_image_to_receiver_with_retry(
                 message["receive_id_type"],
                 message["receive_id"],
                 image_key_cache[image_path],
                 tenant_access_token,
             )
         print(f"Sent: {message.get('name', image_path.name)}")
-        time.sleep(0.4)
+        time.sleep(args.delay)
 
     print("Done.")
 
