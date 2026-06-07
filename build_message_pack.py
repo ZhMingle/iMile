@@ -394,7 +394,7 @@ def build_route_detail_messages():
 
     ranges = {
         "WGR": (8, 9, 6, 7),
-        "HMT": (9, 23, 10, 11),
+        "HMT": (9, 24, 10, 11),
         "RTR": (30, 31, 7, 8),
         "TRG": (29, 34, 10, 11),
         "NPL_HST": (40, 47, 10, 11),
