@@ -7,6 +7,12 @@ import pandas as pd
 
 INPUT_FOLDER = Path("input")
 OUTPUT_FILE = Path("output/query_list.txt")
+OUTPUT_COLUMN = "TrakingNo&BillNumber"
+TRACKING_COLUMN_KEYWORDS = [
+    "trackingno",
+    "billnumber",
+    "imile单号",
+]
 
 
 def find_column(columns, keyword):
@@ -47,8 +53,8 @@ all_numbers = []
 
 excel_files = sorted(
     [
-        *INPUT_FOLDER.glob("*.xls"),
-        *INPUT_FOLDER.glob("*.xlsx"),
+        *(file for file in INPUT_FOLDER.glob("*.xls") if not file.name.startswith("~$")),
+        *(file for file in INPUT_FOLDER.glob("*.xlsx") if not file.name.startswith("~$")),
     ]
 )
 
@@ -59,41 +65,39 @@ for file in excel_files:
         print(f"Error reading {file.name}: {exc}")
         continue
 
-    tracking_col = find_column(df.columns, "trackingno")
-    bill_col = find_column(df.columns, "billnumber")
+    matched_columns = [
+        column
+        for keyword in TRACKING_COLUMN_KEYWORDS
+        if (column := find_column(df.columns, keyword)) is not None
+    ]
 
-    if tracking_col is None and bill_col is None:
-        print(f"Skipped {file.name}: no TrackingNo or BillNumber column")
+    if not matched_columns:
+        print(f"Skipped {file.name}: no TrackingNo, BillNumber, or IMILE单号 column")
         continue
 
     file_rows = 0
 
-    if tracking_col is not None:
-        values = clean_series(df[tracking_col])
-        all_numbers.extend(values)
-        file_rows += len(values)
-
-    if bill_col is not None:
-        values = clean_series(df[bill_col])
+    for column in dict.fromkeys(matched_columns):
+        values = clean_series(df[column])
         all_numbers.extend(values)
         file_rows += len(values)
 
     print(f"Found {file_rows} records in {file.name}")
 
 result = pd.DataFrame({
-    "TrakingNo&BillNumber": sorted(set(all_numbers))
+    OUTPUT_COLUMN: sorted(set(all_numbers))
 })
 
-copy_to_clipboard(result["TrakingNo&BillNumber"].tolist())
+copy_to_clipboard(result[OUTPUT_COLUMN].tolist())
 
 OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 try:
-    OUTPUT_FILE.write_text("\n".join(result["TrakingNo&BillNumber"]) + "\n", encoding="utf-8")
+    OUTPUT_FILE.write_text("\n".join(result[OUTPUT_COLUMN]) + "\n", encoding="utf-8")
 except PermissionError:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     OUTPUT_FILE = OUTPUT_FILE.with_name(f"{OUTPUT_FILE.stem}_{timestamp}{OUTPUT_FILE.suffix}")
-    OUTPUT_FILE.write_text("\n".join(result["TrakingNo&BillNumber"]) + "\n", encoding="utf-8")
+    OUTPUT_FILE.write_text("\n".join(result[OUTPUT_COLUMN]) + "\n", encoding="utf-8")
     print("Default output file is open or locked; wrote a new file instead.")
 
 print(f"Total unique records: {len(result)}")
