@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 lark_config.json
 ~$*
+*中心运单查询*
 input/*
 !input/.gitkeep
 output/*
