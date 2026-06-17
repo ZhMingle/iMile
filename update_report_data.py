@@ -18,7 +18,18 @@ today = datetime.now()
 REPORT_DATE = f"{today.month}月{today.day:02d}日"
 
 SOURCE_SHEET = "数据源1-预测"
-REQUIRED_COLUMNS = ["运单号", "路由码", "派件网点简码"]
+BASE_COLUMNS = ["运单号", "路由码", "派件网点简码"]
+MERCHANT_COLUMN = "商家编号"
+REQUIRED_COLUMNS = [*BASE_COLUMNS, MERCHANT_COLUMN]
+TEMPLATE_REQUIRED_COLUMNS = BASE_COLUMNS
+
+MERCHANT_CODES = {
+    "TEMU": "C2103951401",
+    "CAINIAO": "C2103960401",
+    "SUNYOU": "C2104258001",
+}
+CAINIAO_MERCHANT_CODE = MERCHANT_CODES["CAINIAO"]
+SUNYOU_MERCHANT_CODE = MERCHANT_CODES["SUNYOU"]
 
 
 def clean_text(value):
@@ -154,7 +165,7 @@ def clear_range(ws, min_row, max_row, min_col, max_col):
 
 
 def ensure_data_source_column_order(ws):
-    desired_first_columns = ["运单号", "路由码", "派件网点简码"]
+    desired_first_columns = TEMPLATE_REQUIRED_COLUMNS
     headers = [ws.cell(1, col).value for col in range(1, ws.max_column + 1)]
     if headers[: len(desired_first_columns)] == desired_first_columns:
         return
@@ -217,7 +228,7 @@ def write_data_source(wb, df):
     ensure_data_source_column_order(ws)
 
     header_to_col = {ws.cell(1, col).value: col for col in range(1, ws.max_column + 1)}
-    missing = [column for column in REQUIRED_COLUMNS if column not in header_to_col]
+    missing = [column for column in TEMPLATE_REQUIRED_COLUMNS if column not in header_to_col]
     if missing:
         raise ValueError(f"{SOURCE_SHEET} is missing columns: {missing}")
 
@@ -230,6 +241,8 @@ def write_data_source(wb, df):
         ws.cell(excel_row, header_to_col["运单号"]).value = row["运单号"]
         ws.cell(excel_row, header_to_col["派件网点简码"]).value = row["派件网点简码"]
         ws.cell(excel_row, header_to_col["路由码"]).value = row["路由码"]
+        if MERCHANT_COLUMN in header_to_col:
+            ws.cell(excel_row, header_to_col[MERCHANT_COLUMN]).value = row[MERCHANT_COLUMN]
 
     first_extra_row = len(df) + 2
     if old_max_row >= first_extra_row:
@@ -310,7 +323,7 @@ def update_auckland_sheet(wb, route_counts):
     return total
 
 
-def update_non_auckland_sheet(wb, station_counts, cainiao_counts, aliexpress_count, auckland_total):
+def update_non_auckland_sheet(wb, station_counts, cainiao_counts, sunyou_counts, aliexpress_count, sunyou_count, auckland_total):
     ws = wb["非奥克兰"]
     ws.cell(1, 1).value = f"{REPORT_DATE}非奥克兰到件货量"
     ws.cell(1, 9).value = REPORT_DATE
@@ -326,13 +339,18 @@ def update_non_auckland_sheet(wb, station_counts, cainiao_counts, aliexpress_cou
 
         ws.cell(row, 3).value = arrival
         ws.cell(row, 6).value = cainiao_counts.get(station, 0)
+        ws.cell(row, 7).value = sunyou_counts.get(station, 0)
 
     non_auckland_total = sum(ws.cell(row, 3).value or 0 for row in range(3, total_row))
     cainiao_total = sum(ws.cell(row, 6).value or 0 for row in range(3, total_row))
+    sunyou_total = sum(ws.cell(row, 7).value or 0 for row in range(3, total_row))
 
     ws.cell(total_row, 3).value = non_auckland_total
     ws.cell(total_row, 6).value = cainiao_total
+    ws.cell(total_row, 7).value = sunyou_total
     ws.cell(14, 1).value = aliexpress_count
+    ws.cell(13, 3).value = "顺友单量"
+    ws.cell(14, 3).value = sunyou_count
 
     write_total_breakdown(ws, auckland_total, non_auckland_total)
 
@@ -371,6 +389,9 @@ def write_total_breakdown(ws, auckland_total, non_auckland_total):
     ws.cell(13, 7).value = None
     ws.cell(14, 7).value = None
 
+    ws.merge_cells(start_row=13, start_column=6, end_row=13, end_column=7)
+    ws.merge_cells(start_row=14, start_column=6, end_row=14, end_column=7)
+
     header_cell = ws.cell(13, 6)
     value_cell = ws.cell(14, 6)
     header_cell.value = "当天总量（奥克兰 + 外省）"
@@ -383,7 +404,8 @@ def write_total_breakdown(ws, auckland_total, non_auckland_total):
 
     ws.column_dimensions["D"].width = 20.8181818181818
     ws.column_dimensions["E"].width = 12.8181818181818
-    ws.column_dimensions["F"].width = 49.7818181818182
+    ws.column_dimensions["F"].width = 24.9
+    ws.column_dimensions["G"].width = 24.9
 
 
 def round_excel(value, digits=2):
@@ -436,8 +458,12 @@ def main():
 
     station_counts = Counter(df["派件网点简码"])
     route_counts = Counter(df["路由码"])
-    cainiao_counts = Counter(df.loc[df["运单号"].str.startswith("36"), "派件网点简码"])
-    aliexpress_count = int(df["运单号"].str.startswith("36").sum())
+    cainiao_mask = df[MERCHANT_COLUMN].eq(CAINIAO_MERCHANT_CODE)
+    sunyou_mask = df[MERCHANT_COLUMN].eq(SUNYOU_MERCHANT_CODE)
+    cainiao_counts = Counter(df.loc[cainiao_mask, "派件网点简码"])
+    sunyou_counts = Counter(df.loc[sunyou_mask, "派件网点简码"])
+    aliexpress_count = int(cainiao_mask.sum())
+    sunyou_count = int(sunyou_mask.sum())
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -454,7 +480,9 @@ def main():
         wb,
         station_counts,
         cainiao_counts,
+        sunyou_counts,
         aliexpress_count,
+        sunyou_count,
         auckland_total,
     )
 
@@ -475,6 +503,13 @@ def main():
     print(f"Non-Auckland station total: {non_auckland_total}")
     print(f"Workbook total logic: {auckland_total + non_auckland_total}")
     print(f"Unique waybill total: {df['运单号'].nunique()}")
+    merchant_counts = Counter(df[MERCHANT_COLUMN])
+    print(
+        "Merchant totals: "
+        f"TEMU={merchant_counts.get(MERCHANT_CODES['TEMU'], 0)}, "
+        f"Cainiao={merchant_counts.get(MERCHANT_CODES['CAINIAO'], 0)}, "
+        f"Sunyou={merchant_counts.get(MERCHANT_CODES['SUNYOU'], 0)}"
+    )
     if not overlap.empty:
         print("Potential double-count rows:")
         print(overlap[REQUIRED_COLUMNS].to_string(index=False))

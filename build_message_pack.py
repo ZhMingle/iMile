@@ -246,12 +246,12 @@ def render_side_by_side_route_image(path, tables):
     image.save(path)
 
 
-def render_non_auckland_overview(path, overview, board_3l, board_5l, aliexpress_count, total_count, auckland_count, province_count):
+def render_non_auckland_overview(path, overview, board_3l, board_5l, aliexpress_count, sunyou_count, total_count, auckland_count, province_count):
     cell_h = 36
     title_h = 60
     header_h = 48
     gap = 28
-    main_widths = [210, 210, 360]
+    main_widths = [210, 210, 300, 300]
     side_widths = [100, 190]
     width = sum(main_widths) + gap + sum(side_widths)
     height = 840
@@ -264,14 +264,14 @@ def render_non_auckland_overview(path, overview, board_3l, board_5l, aliexpress_
     draw_centered_text(draw, (x0, y0, x0 + main_w, y0 + title_h), f"{REPORT_DATE}非奥克兰到件货量", FONT_TITLE)
     y = y0 + title_h
     x = x0
-    for header, col_w in zip(["派件网点", "到件货量", "外省菜鸟到货量"], main_widths):
+    for header, col_w in zip(["派件网点", "到件货量", "外省菜鸟到货量", "外省顺友到货量"], main_widths):
         rect(draw, [x, y, x + col_w, y + header_h], fill=LIGHT_BLUE, outline=BLACK, width=line_width())
         draw_centered_text(draw, (x, y, x + col_w, y + header_h), header, FONT_HEADER)
         x += col_w
     y += header_h
 
     for row in overview.itertuples(index=False):
-        values = [row.station, row.arrival_volume, row.cainiao_volume]
+        values = [row.station, row.arrival_volume, row.cainiao_volume, row.sunyou_volume]
         is_total = row.station == "总计"
         x = x0
         for value, col_w in zip(values, main_widths):
@@ -287,8 +287,14 @@ def render_non_auckland_overview(path, overview, board_3l, board_5l, aliexpress_
     rect(draw, [x0, y + header_h, x0 + main_widths[0], y + header_h + cell_h], fill=WHITE, outline=BLACK, width=line_width())
     draw_centered_text(draw, (x0, y + header_h, x0 + main_widths[0], y + header_h + cell_h), aliexpress_count, FONT_BODY)
 
+    sunyou_x = x0 + main_widths[0]
+    rect(draw, [sunyou_x, y, sunyou_x + main_widths[1], y + header_h], fill=LIGHT_BLUE, outline=BLACK, width=line_width())
+    draw_centered_text(draw, (sunyou_x, y, sunyou_x + main_widths[1], y + header_h), "顺友单量", FONT_HEADER)
+    rect(draw, [sunyou_x, y + header_h, sunyou_x + main_widths[1], y + header_h + cell_h], fill=WHITE, outline=BLACK, width=line_width())
+    draw_centered_text(draw, (sunyou_x, y + header_h, sunyou_x + main_widths[1], y + header_h + cell_h), sunyou_count, FONT_BODY)
+
     total_x = x0 + main_widths[0] + main_widths[1]
-    total_width = main_widths[2]
+    total_width = main_widths[2] + main_widths[3]
     total_display = f"{total_count}（{auckland_count} + {province_count}）"
     rect(draw, [total_x, y, total_x + total_width, y + header_h], fill="#FFC000", outline=BLACK, width=line_width())
     draw_centered_text(draw, (total_x, y, total_x + total_width, y + header_h), "当天总量（奥克兰 + 外省）", FONT_HEADER)
@@ -346,11 +352,12 @@ def build_supplier_messages():
 def build_non_auckland_messages():
     df = pd.read_excel(REPORT_FILE, sheet_name="非奥克兰", header=None, dtype=str).fillna("")
 
-    overview = df.iloc[2:11, [0, 2, 5]].copy()
-    overview.columns = ["station", "arrival_volume", "cainiao_volume"]
+    overview = df.iloc[2:11, [0, 2, 5, 6]].copy()
+    overview.columns = ["station", "arrival_volume", "cainiao_volume", "sunyou_volume"]
     overview["station"] = overview["station"].map(clean_text)
     overview["arrival_volume"] = overview["arrival_volume"].map(clean_number)
     overview["cainiao_volume"] = overview["cainiao_volume"].map(clean_number)
+    overview["sunyou_volume"] = overview["sunyou_volume"].map(clean_number)
 
     board_3l = df.iloc[2:10, [7, 8]].copy()
     board_3l.columns = ["station", "boards"]
@@ -363,6 +370,7 @@ def build_non_auckland_messages():
     board_5l["boards"] = board_5l["boards"].map(clean_number)
 
     aliexpress_count = clean_number(df.iloc[13, 0])
+    sunyou_count = clean_number(df.iloc[13, 2])
     province_total = overview.loc[overview["station"].eq("总计"), "arrival_volume"]
     province_count = clean_number(province_total.iloc[0]) if not province_total.empty else 0
     total_count, auckland_count, province_count = parse_total_breakdown(df.iloc[13, 5], province_count)
@@ -376,6 +384,7 @@ def build_non_auckland_messages():
         board_3l,
         board_5l,
         aliexpress_count,
+        sunyou_count,
         total_count,
         auckland_count,
         province_count,

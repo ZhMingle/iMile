@@ -1,5 +1,55 @@
 # iMile Daily Report Automation
 
+## Sending Mode Quick Reference
+
+Use the explicit shortcut scripts to avoid duplicate sending:
+
+```powershell
+.\daily_webhook.bat   # Full daily workflow, send through existing webhooks / bots
+.\daily_as_me.bat     # Full daily workflow, send as your own Feishu/Lark account
+.\send_as_me.bat      # Send configured user-identity images only, without rebuilding reports
+```
+
+The old `run_daily_report.bat` entry has been removed because it was too easy to send through more than one delivery mode by mistake.
+
+`run_daily_report.py` and `send_lark_images.py` default to webhook-only sending. User-identity sending happens only when you explicitly use `--send-as user` or one of the `*_as_me.bat` shortcuts.
+
+### Delivery Modes
+
+In `lark_config.json`, each message chooses one delivery mode:
+
+```json
+{
+  "name": "Supplier group",
+  "send_as": "webhook",
+  "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/...",
+  "secret": "",
+  "image": "output/supplier/Click'N Code.png"
+}
+```
+
+```json
+{
+  "name": "Management group - send as me",
+  "send_as": "user",
+  "receive_id_type": "chat_id",
+  "receive_id": "oc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "image": "output/supplier/Click'N Code.png"
+}
+```
+
+For Feishu China, keep these top-level config fields:
+
+```json
+{
+  "open_platform_domain": "open.feishu.cn",
+  "redirect_uri": "http://localhost:8765/callback",
+  "user_scope": "im:message im:message.send_as_user"
+}
+```
+
+The redirect URL must be added in the Feishu Developer Console. The app also needs the user permissions `im:message` and `im:message.send_as_user` for personal-account sending.
+
 ## 中文说明
 
 ### 项目目的
@@ -26,6 +76,9 @@
 ├── build_message_pack.py   # 生成飞书发送用 PNG 图片
 ├── send_lark_images.py     # 发送图片到飞书
 ├── run_daily_report.py     # 一键执行更新、生成、发送
+├── daily_webhook.bat       # 一键日报，用 webhook / 机器人发送
+├── daily_as_me.bat         # 一键日报，用个人账号发送
+├── send_as_me.bat          # 只发送个人账号测试消息
 ├── getTrakingNum.py        # 从 input 文件提取单号到 txt
 ├── lark_config.json        # 本地真实飞书配置，不提交到 Git
 └── lark_config.example.json# 飞书配置模板
@@ -74,6 +127,7 @@ output/query_list.txt
 运单号
 路由码
 派件网点简码
+商家编号
 ```
 
 常见派件网点简码包括：
@@ -86,7 +140,7 @@ AKL, HMT, TRG, WLT, NPL, PMN, RTR, WGR, HST
 
 - `AKL` 用于奥克兰分单统计
 - 非 `AKL` 用于非奥克兰到件货量统计
-- 运单号以 `36` 开头的记录会被用于 AliExpress / 菜鸟相关统计
+- `商家编号` 用于区分 TEMU、菜鸟、顺友等渠道；菜鸟相关统计按菜鸟商家编号计算，不再按运单号 `36` 开头猜测
 
 #### 最终结果文件
 
@@ -127,27 +181,52 @@ copy lark_config.example.json lark_config.json
 ```text
 app_id
 app_secret
-webhook 或 receive_id_type + receive_id
+open_platform_domain
+redirect_uri
+user_scope
+webhook（webhook 消息）
+receive_id_type + receive_id（app/user 消息）
 ```
 
 `lark_config.json` 已被 `.gitignore` 忽略，不会提交到 Git。
 
+`send_as` 决定每条消息的发送方式：
+
+- `webhook`：走原来的 webhook / 机器人。
+- `user`：用你自己的飞书账号发送。第一次运行会打开授权页，授权后脚本会把 `user_refresh_token` 写入 `lark_config.json`。
+- `app`：用应用机器人身份发送。
+
+中国版飞书使用：
+
+```json
+{
+  "open_platform_domain": "open.feishu.cn",
+  "redirect_uri": "http://localhost:8765/callback",
+  "user_scope": "im:message im:message.send_as_user"
+}
+```
+
+`redirect_uri` 需要在飞书开放平台后台登记。个人账号发送需要用户身份权限 `im:message` 和 `im:message.send_as_user`。
+
 #### 3. 一键运行日报流程
 
+Webhook / 机器人发送：
+
 ```powershell
-python run_daily_report
+.\daily_webhook.bat
 ```
 
-或者：
+个人账号发送：
 
 ```powershell
-python run_daily_report.py
+.\daily_as_me.bat
 ```
 
-Windows 下也可以运行：
+也可以直接指定发送方式：
 
 ```powershell
-.\run_daily_report.bat
+python run_daily_report.py --send-as webhook
+python run_daily_report.py --send-as user
 ```
 
 执行顺序是：
@@ -155,7 +234,7 @@ Windows 下也可以运行：
 ```text
 1. update_report_data.py
 2. build_message_pack.py
-3. send_lark_images.py --send
+3. send_lark_images.py --send --send-as webhook/user
 ```
 
 #### 4. 只更新主报表
@@ -189,6 +268,18 @@ output/province/
 
 ```powershell
 python send_lark_images.py --send
+```
+
+默认只走 webhook / 机器人。只用个人账号发送：
+
+```powershell
+.\send_as_me.bat
+```
+
+或者：
+
+```powershell
+python send_lark_images.py --send --send-as user
 ```
 
 如果遇到飞书限流，可以增加发送间隔：
@@ -280,6 +371,9 @@ Previously, the process required manually copying tracking numbers, querying the
 ├── build_message_pack.py   # Generates PNG images for Lark
 ├── send_lark_images.py     # Sends images to Lark
 ├── run_daily_report.py     # Runs update, image generation, and sending
+├── daily_webhook.bat       # Runs full workflow and sends with webhooks
+├── daily_as_me.bat         # Runs full workflow and sends as your own account
+├── send_as_me.bat          # Sends user-identity images only
 ├── getTrakingNum.py        # Extracts tracking numbers from input files
 ├── lark_config.json        # Real local Lark config; ignored by Git
 └── lark_config.example.json# Lark config template
@@ -334,6 +428,7 @@ The script picks the latest valid workbook. Required columns:
 运单号
 路由码
 派件网点简码
+商家编号
 ```
 
 Common station codes:
@@ -346,7 +441,7 @@ Rules:
 
 - `AKL` is used for Auckland dispatch statistics
 - Non-`AKL` rows are used for non-Auckland inbound statistics
-- Waybill numbers starting with `36` are counted for AliExpress / Cainiao-related metrics
+- `商家编号` / merchant ID is used to distinguish TEMU, Cainiao, Sunyou, and other channels. Cainiao-related metrics are calculated by Cainiao merchant ID, no longer by guessing from waybill numbers starting with `36`.
 
 #### Final result workbook
 
@@ -387,27 +482,43 @@ Then fill in real values in `lark_config.json`:
 ```text
 app_id
 app_secret
-webhook or receive_id_type + receive_id
+open_platform_domain
+redirect_uri
+user_scope
+webhook for webhook messages
+receive_id_type + receive_id for app/user messages
 ```
 
 `lark_config.json` is ignored by Git.
 
+Use `send_as` per message:
+
+- `webhook`: send through the existing webhook bot.
+- `user`: send through your own Feishu/Lark account. The first run opens the OAuth authorization page and then stores `user_refresh_token` in `lark_config.json`.
+- `app`: send through the app bot using `tenant_access_token`.
+
+For Feishu China, use:
+
+```json
+{
+  "open_platform_domain": "open.feishu.cn",
+  "redirect_uri": "http://localhost:8765/callback",
+  "user_scope": "im:message im:message.send_as_user"
+}
+```
+
 #### 3. Run the full daily workflow
 
+Use one of the explicit daily shortcuts:
+
 ```powershell
-python run_daily_report
+.\daily_webhook.bat
 ```
 
 or:
 
 ```powershell
-python run_daily_report.py
-```
-
-On Windows, you can also run:
-
-```powershell
-.\run_daily_report.bat
+.\daily_as_me.bat
 ```
 
 The workflow runs:
@@ -415,7 +526,14 @@ The workflow runs:
 ```text
 1. update_report_data.py
 2. build_message_pack.py
-3. send_lark_images.py --send
+3. send_lark_images.py --send --send-as webhook/user
+```
+
+You can also call the Python entry directly:
+
+```powershell
+python run_daily_report.py --send-as webhook
+python run_daily_report.py --send-as user
 ```
 
 #### 4. Update only the workbook
@@ -449,6 +567,18 @@ This script now generates PNG images only. It no longer generates CSV or TXT fil
 
 ```powershell
 python send_lark_images.py --send
+```
+
+The default is webhook-only. To send as your own account:
+
+```powershell
+.\send_as_me.bat
+```
+
+or:
+
+```powershell
+python send_lark_images.py --send --send-as user
 ```
 
 If Lark rate-limits sending, increase the delay:
