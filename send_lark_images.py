@@ -65,6 +65,22 @@ def delete_json(url, headers=None, timeout=20):
         raise RuntimeError(f"HTTP {error.code} from {url}: {body}") from error
 
 
+def patch_json(url, payload, headers=None, timeout=20):
+    body = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={"Content-Type": "application/json", **(headers or {})},
+        method="PATCH",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"HTTP {error.code} from {url}: {body}") from error
+
+
 def load_config(path):
     if not path.exists():
         raise FileNotFoundError(
@@ -235,6 +251,19 @@ def send_image(webhook, image_key, secret=""):
     return data
 
 
+def image_card_content(image_key, alt_text="report image"):
+    return {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {
+                "tag": "img",
+                "img_key": image_key,
+                "alt": {"tag": "plain_text", "content": alt_text},
+            }
+        ],
+    }
+
+
 def send_image_with_retry(webhook, image_key, secret="", max_attempts=5):
     waits = [10, 20, 40, 80]
     for attempt in range(max_attempts):
@@ -258,14 +287,14 @@ def send_image_with_retry(webhook, image_key, secret="", max_attempts=5):
         raise RuntimeError(f"Failed to send image: {data}")
 
 
-def send_image_to_receiver(receive_id_type, receive_id, image_key, access_token, config):
+def send_image_to_receiver(receive_id_type, receive_id, image_key, access_token, config, name="report image"):
     url = f"{api_url(config, SEND_MESSAGE_PATH)}?receive_id_type={receive_id_type}"
     data = post_json(
         url,
         {
             "receive_id": receive_id,
-            "msg_type": "image",
-            "content": json.dumps({"image_key": image_key}, ensure_ascii=False),
+            "msg_type": "interactive",
+            "content": json.dumps(image_card_content(image_key, name), ensure_ascii=False),
         },
         headers={"Authorization": f"Bearer {access_token}"},
     )
@@ -274,7 +303,15 @@ def send_image_to_receiver(receive_id_type, receive_id, image_key, access_token,
     return data
 
 
-def send_image_to_receiver_with_retry(receive_id_type, receive_id, image_key, access_token, config, max_attempts=5):
+def send_image_to_receiver_with_retry(
+    receive_id_type,
+    receive_id,
+    image_key,
+    access_token,
+    config,
+    name="report image",
+    max_attempts=5,
+):
     waits = [10, 20, 40, 80]
     for attempt in range(max_attempts):
         url = f"{api_url(config, SEND_MESSAGE_PATH)}?receive_id_type={receive_id_type}"
@@ -283,8 +320,8 @@ def send_image_to_receiver_with_retry(receive_id_type, receive_id, image_key, ac
                 url,
                 {
                     "receive_id": receive_id,
-                    "msg_type": "image",
-                    "content": json.dumps({"image_key": image_key}, ensure_ascii=False),
+                    "msg_type": "interactive",
+                    "content": json.dumps(image_card_content(image_key, name), ensure_ascii=False),
                 },
                 headers={"Authorization": f"Bearer {access_token}"},
             )
@@ -378,11 +415,89 @@ def select_recent_messages_for_recall(path, send_as, count):
     return list(reversed(candidates[-count:]))
 
 
+def select_recent_messages_for_update(path, send_as, count):
+    records = load_sent_log(path)
+    recalled = {
+        record.get("message_id")
+        for record in records
+        if record.get("action") == "recall" and record.get("message_id")
+    }
+    candidates = [
+        record
+        for record in records
+        if record.get("action") in {"send", "update"}
+        and record.get("send_as") == send_as
+        and record.get("message_id")
+        and record.get("msg_type") == "interactive"
+        and record.get("message_id") not in recalled
+    ]
+    latest_by_message_id = {}
+    for record in candidates:
+        latest_by_message_id[record["message_id"]] = record
+    return list(reversed(list(latest_by_message_id.values())[-count:]))
+
+
+def select_latest_batch_for_update(path, send_as):
+    records = load_sent_log(path)
+    recalled = {
+        record.get("message_id")
+        for record in records
+        if record.get("action") == "recall" and record.get("message_id")
+    }
+    candidates = [
+        record
+        for record in records
+        if record.get("action") in {"send", "update"}
+        and record.get("send_as") == send_as
+        and record.get("message_id")
+        and record.get("msg_type") == "interactive"
+        and record.get("message_id") not in recalled
+    ]
+    latest_batch_id = next(
+        (record.get("batch_id") for record in reversed(candidates) if record.get("batch_id")),
+        None,
+    )
+    if latest_batch_id:
+        batch_records = [record for record in candidates if record.get("batch_id") == latest_batch_id]
+    else:
+        batch_records = []
+        for record in reversed(records):
+            if (
+                record.get("action") in {"send", "update"}
+                and record.get("send_as") == send_as
+                and record.get("message_id")
+                and record.get("msg_type") == "interactive"
+                and record.get("message_id") not in recalled
+            ):
+                batch_records.append(record)
+                continue
+            if batch_records:
+                break
+        batch_records.reverse()
+
+    latest_by_message_id = {}
+    for record in batch_records:
+        latest_by_message_id[record["message_id"]] = record
+    return list(latest_by_message_id.values())
+
+
 def recall_message(message_id, access_token, config):
     url = f"{api_url(config, SEND_MESSAGE_PATH)}/{urllib.parse.quote(message_id, safe='')}"
     data = delete_json(url, headers={"Authorization": f"Bearer {access_token}"})
     if data.get("code") != 0:
         raise RuntimeError(f"Failed to recall message {message_id}: {data}")
+    return data
+
+
+def update_message_image(message_id, image_key, access_token, config):
+    url = f"{api_url(config, SEND_MESSAGE_PATH)}/{urllib.parse.quote(message_id, safe='')}"
+    data = patch_json(
+        url,
+        {"content": json.dumps(image_card_content(image_key), ensure_ascii=False)},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    if data.get("code") != 0:
+        raise RuntimeError(f"Failed to update message {message_id}: {data}")
     return data
 
 
@@ -502,6 +617,28 @@ def main():
         type=int,
         help="Recall the last N unrecalled API-sent messages for --send-as app/user.",
     )
+    parser.add_argument(
+        "--update-message",
+        action="append",
+        default=[],
+        help="Update a specific message_id to a new image. Requires --image and --send-as app/user.",
+    )
+    parser.add_argument(
+        "--update-last",
+        nargs="?",
+        const=1,
+        type=int,
+        help="Update the last N API-sent messages for --send-as app/user.",
+    )
+    parser.add_argument(
+        "--update-latest-batch",
+        action="store_true",
+        help="Update every message in the latest API-sent batch for --send-as app/user.",
+    )
+    parser.add_argument(
+        "--image",
+        help="Image path for --update-message, or an override image for --update-last.",
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config)
@@ -532,6 +669,50 @@ def main():
                 },
             )
             print(f"Recalled: {record.get('name', message_id)} ({message_id})")
+        print("Done.")
+        return
+
+    if args.update_message or args.update_last or args.update_latest_batch:
+        if args.send_as not in {"app", "user"}:
+            raise RuntimeError("Update needs an API sender. Run with --send-as user or --send-as app.")
+        update_records = [
+            {"message_id": message_id, "name": message_id, "image": args.image}
+            for message_id in args.update_message
+        ]
+        if args.update_latest_batch:
+            update_records.extend(select_latest_batch_for_update(sent_log_path, args.send_as))
+        if args.update_last:
+            if args.update_last < 1:
+                raise RuntimeError("--update-last must be at least 1.")
+            update_records.extend(select_recent_messages_for_update(sent_log_path, args.send_as, args.update_last))
+        if not update_records:
+            raise RuntimeError(f"No {args.send_as} messages found in {sent_log_path}.")
+        if args.update_message and not args.image:
+            raise RuntimeError("--update-message requires --image.")
+
+        tokens = get_tokens(config, config_path, {"app", args.send_as})
+        image_key_cache = {}
+        for record in update_records:
+            image_path = Path(args.image or record.get("image", ""))
+            if not image_path.exists():
+                raise RuntimeError(f"Update image not found for {record['message_id']}: {image_path}")
+            if image_path not in image_key_cache:
+                image_key_cache[image_path] = upload_image(image_path, tokens["app"], config)
+            update_message_image(record["message_id"], image_key_cache[image_path], tokens[args.send_as], config)
+            append_sent_log(
+                sent_log_path,
+                {
+                    "action": "update",
+                    "send_as": args.send_as,
+                    "message_id": record["message_id"],
+                    "name": record.get("name", record["message_id"]),
+                    "image": str(image_path),
+                    "batch_id": record.get("batch_id"),
+                    "msg_type": "interactive",
+                },
+            )
+            print(f"Updated: {record.get('name', record['message_id'])} ({record['message_id']})")
+            time.sleep(args.delay)
         print("Done.")
         return
 
@@ -570,6 +751,7 @@ def main():
     tokens = get_tokens(config, config_path, required_modes)
 
     image_key_cache = {}
+    batch_id = f"{time.strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4)}"
     for message in messages:
         image_path = Path(message["image"])
         send_as = message_send_as(message, default_send_as)
@@ -584,6 +766,7 @@ def main():
                 image_key_cache[image_path],
                 tokens[send_as],
                 config,
+                message.get("name", image_path.name),
             )
             message_id = get_message_id(data)
             if message_id:
@@ -597,6 +780,8 @@ def main():
                         "image": str(image_path),
                         "receive_id_type": message["receive_id_type"],
                         "receive_id": message["receive_id"],
+                        "batch_id": batch_id,
+                        "msg_type": "interactive",
                     },
                 )
             else:
