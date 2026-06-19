@@ -38,9 +38,18 @@ def clean_text(value):
     return str(value).strip()
 
 
+def clean_route_code(value):
+    return re.sub(r"\s+", "", clean_text(value))
+
+
+def is_route_code(value):
+    return any(char.isdigit() for char in value)
+
+
 def load_source_data():
     source_file, df = find_latest_source_file()
     print(f"Using source file: {source_file}")
+    df["路由码"] = df["路由码"].map(clean_route_code)
     df = df[df["运单号"] != ""].drop_duplicates(subset=["运单号"], keep="first")
     return df.reset_index(drop=True)
 
@@ -71,10 +80,14 @@ def find_latest_source_file():
 
 
 def find_latest_template_file():
+    canonical_template = Path("当日数据统计_20260603_233359_公式版.xlsx")
+    if canonical_template.exists():
+        return canonical_template
+
     files = [
         path
         for path in Path(".").glob(TEMPLATE_PATTERN)
-        if not path.name.startswith("~$")
+        if not path.name.startswith("~$") and not re.search(r"_\d{8}_\d{6}\.xlsx$", path.name)
     ]
     if not files:
         raise FileNotFoundError(f"No template file found matching {TEMPLATE_PATTERN}")
@@ -298,12 +311,12 @@ def rebuild_auckland_pivot(wb, route_counts):
         (30, 31, 7, 8),   # RTR
         (29, 34, 10, 11), # TRG
         (40, 47, 10, 11), # NPL/HST
-        (9, 19, 13, 14),  # WLT
+        (9, 21, 13, 14),  # WLT
     ]
     for start_row, end_row, route_col, qty_col in route_table_ranges:
         for row in range(start_row, end_row + 1):
-            route_code = clean_text(ws.cell(row, route_col).value)
-            if route_code:
+            route_code = clean_route_code(ws.cell(row, route_col).value)
+            if is_route_code(route_code):
                 ws.cell(row, qty_col).value = route_counts.get(route_code, 0)
 
 
@@ -314,7 +327,7 @@ def update_auckland_sheet(wb, route_counts):
     total_row = find_total_row(ws, column=1)
 
     for row in range(3, total_row):
-        route_code = clean_text(ws.cell(row, 1).value)
+        route_code = clean_route_code(ws.cell(row, 1).value)
         if route_code:
             ws.cell(row, 3).value = route_counts.get(route_code, 0)
 
@@ -520,9 +533,9 @@ def get_auckland_route_codes(wb):
     ws = wb["奥克兰"]
     total_row = find_total_row(ws, column=1)
     return {
-        clean_text(ws.cell(row, 1).value)
+        clean_route_code(ws.cell(row, 1).value)
         for row in range(3, total_row)
-        if clean_text(ws.cell(row, 1).value)
+        if clean_route_code(ws.cell(row, 1).value)
     }
 
 

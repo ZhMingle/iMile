@@ -3,7 +3,7 @@
   "app_secret": "your_lark_app_secret",
   "open_platform_domain": "open.feishu.cn",
   "redirect_uri": "http://localhost:8765/callback",
-  "user_scope": "im:message im:message.send_as_user",
+  "user_scope": "im:message im:message.send_as_user im:message:recall",
   "send_as": "auto",
   "messages": [
     {

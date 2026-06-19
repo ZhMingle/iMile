@@ -64,6 +64,14 @@ def clean_text(value):
     return str(value).strip()
 
 
+def clean_route_code(value):
+    return re.sub(r"\s+", "", clean_text(value))
+
+
+def is_route_code(value):
+    return any(char.isdigit() for char in value)
+
+
 def clean_number(value):
     number = pd.to_numeric(value, errors="coerce")
     if pd.isna(number):
@@ -331,7 +339,7 @@ def build_supplier_messages():
     df = pd.read_excel(REPORT_FILE, sheet_name="奥克兰", header=None, dtype=str).fillna("")
     rows = df.iloc[2:101, [0, 2, 6]].copy()
     rows.columns = ["route_code", "quantity", "supplier"]
-    rows["route_code"] = rows["route_code"].map(clean_text)
+    rows["route_code"] = rows["route_code"].map(clean_route_code)
     rows["supplier"] = rows["supplier"].map(clean_text)
     rows["quantity"] = rows["quantity"].map(clean_number)
     rows = rows[(rows["route_code"] != "") & (rows["supplier"] != "")]
@@ -397,7 +405,7 @@ def build_route_detail_messages():
     source_ws = wb["数据源1-预测"]
     route_counts = {}
     for (route_code,) in source_ws.iter_rows(min_row=2, min_col=2, max_col=2, values_only=True):
-        route_code = clean_text(route_code)
+        route_code = clean_route_code(route_code)
         if route_code:
             route_counts[route_code] = route_counts.get(route_code, 0) + 1
 
@@ -407,7 +415,7 @@ def build_route_detail_messages():
         "RTR": (30, 31, 7, 8),
         "TRG": (29, 34, 10, 11),
         "NPL_HST": (40, 47, 10, 11),
-        "WLT": (9, 19, 13, 14),
+        "WLT": (9, 21, 13, 14),
     }
 
     details_by_name = {}
@@ -415,13 +423,13 @@ def build_route_detail_messages():
     for name, (start, end, route_col, qty_col) in ranges.items():
         rows = []
         for row in range(start, end + 1):
-            route_code = clean_text(ws.cell(row, route_col).value)
+            route_code = clean_route_code(ws.cell(row, route_col).value)
             quantity_value = ws.cell(row, qty_col).value
             if isinstance(quantity_value, str) and quantity_value.startswith("="):
                 quantity = route_counts.get(route_code, 0)
             else:
                 quantity = clean_number(quantity_value)
-            if route_code and route_code not in {"Route Code", "总计"}:
+            if is_route_code(route_code):
                 rows.append({"route_code": route_code, "quantity": quantity})
 
         detail = pd.DataFrame(rows, columns=["route_code", "quantity"])

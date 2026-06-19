@@ -44,11 +44,11 @@ For Feishu China, keep these top-level config fields:
 {
   "open_platform_domain": "open.feishu.cn",
   "redirect_uri": "http://localhost:8765/callback",
-  "user_scope": "im:message im:message.send_as_user"
+  "user_scope": "im:message im:message.send_as_user im:message:recall"
 }
 ```
 
-The redirect URL must be added in the Feishu Developer Console. The app also needs the user permissions `im:message` and `im:message.send_as_user` for personal-account sending.
+The redirect URL must be added in the Feishu Developer Console. The app also needs the user permissions `im:message` and `im:message.send_as_user` for personal-account sending. To recall API-sent messages, also enable `im:message:recall`.
 
 ## 中文说明
 
@@ -202,11 +202,11 @@ receive_id_type + receive_id（app/user 消息）
 {
   "open_platform_domain": "open.feishu.cn",
   "redirect_uri": "http://localhost:8765/callback",
-  "user_scope": "im:message im:message.send_as_user"
+  "user_scope": "im:message im:message.send_as_user im:message:recall"
 }
 ```
 
-`redirect_uri` 需要在飞书开放平台后台登记。个人账号发送需要用户身份权限 `im:message` 和 `im:message.send_as_user`。
+`redirect_uri` 需要在飞书开放平台后台登记。个人账号发送需要用户身份权限 `im:message` 和 `im:message.send_as_user`；撤回 API 发送的消息还需要 `im:message:recall`。
 
 #### 3. 一键运行日报流程
 
@@ -289,6 +289,36 @@ python send_lark_images.py --send --delay 5
 ```
 
 脚本遇到飞书限流 `11232` 时会自动等待并重试。
+
+#### 7. 撤回 API 发送的消息
+
+`app` 或 `user` 方式发送成功后，脚本会把飞书返回的 `message_id` 自动记录到：
+
+```text
+output/sent_messages.jsonl
+```
+
+用户授权 token 会缓存到 `output/lark_user_token.json`，避免连续撤回时每条消息都重新打开授权页。`output/` 已被 `.gitignore` 忽略，不会提交这些本地 token。
+
+撤回最近一条个人账号发送的消息：
+
+```powershell
+python send_lark_images.py --recall-last --send-as user
+```
+
+撤回最近 3 条个人账号发送的消息：
+
+```powershell
+python send_lark_images.py --recall-last 3 --send-as user
+```
+
+指定 `message_id` 撤回：
+
+```powershell
+python send_lark_images.py --recall-message om_xxxxxxxxx --send-as user
+```
+
+Webhook 发送的消息不会记录可撤回的 `message_id`，所以这套撤回命令只适用于 `app` / `user` API 发送方式。
 
 #### 7. 生成查询单号文本
 
@@ -503,7 +533,7 @@ For Feishu China, use:
 {
   "open_platform_domain": "open.feishu.cn",
   "redirect_uri": "http://localhost:8765/callback",
-  "user_scope": "im:message im:message.send_as_user"
+  "user_scope": "im:message im:message.send_as_user im:message:recall"
 }
 ```
 
@@ -588,6 +618,36 @@ python send_lark_images.py --send --delay 5
 ```
 
 The script automatically retries when Lark returns rate limit code `11232`.
+
+#### 7. Recall API-sent Messages
+
+When `app` or `user` sending succeeds, the script stores the returned `message_id` in:
+
+```text
+output/sent_messages.jsonl
+```
+
+User tokens are cached in `output/lark_user_token.json` so repeated recalls do not open the authorization page for every message. `output/` is ignored by Git.
+
+Recall the latest user-identity message:
+
+```powershell
+python send_lark_images.py --recall-last --send-as user
+```
+
+Recall the latest 3 user-identity messages:
+
+```powershell
+python send_lark_images.py --recall-last 3 --send-as user
+```
+
+Recall a specific `message_id`:
+
+```powershell
+python send_lark_images.py --recall-message om_xxxxxxxxx --send-as user
+```
+
+Webhook messages do not provide a reusable `message_id` here, so recall is supported for `app` / `user` API sends only.
 
 #### 7. Generate tracking query text
 
