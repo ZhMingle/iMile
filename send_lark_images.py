@@ -559,11 +559,14 @@ def main():
     if args.send_as == "all":
         print("\nWarning: --send-as all will send every configured delivery mode.")
 
-    required_modes = {
+    # Uploading an image to Lark always needs the app token, even when the
+    # final delivery is through an incoming webhook.
+    required_modes = {"app"}
+    required_modes.update(
         message_send_as(message, default_send_as)
         for message in messages
-        if message_send_as(message, default_send_as) in {"app", "user"}
-    }
+        if message_send_as(message, default_send_as) == "user"
+    )
     tokens = get_tokens(config, config_path, required_modes)
 
     image_key_cache = {}
