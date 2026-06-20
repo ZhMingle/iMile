@@ -1,0 +1,25 @@
+{
+  "app_id": "",
+  "app_secret": "",
+  "open_platform_domain": "open.feishu.cn",
+  "send_as": "app",
+  "messages": [
+    {"name": "Click'N Code", "receive_id_type": "chat_id", "receive_id": "", "image": "output/supplier/Click'N Code.png"},
+    {"name": "EMPIRE COURIER", "receive_id_type": "chat_id", "receive_id": "", "image": "output/supplier/EMPIRE COURIER.png"},
+    {"name": "Fast donkey", "receive_id_type": "chat_id", "receive_id": "", "image": "output/supplier/Fast donkey.png"},
+    {"name": "Fast Rabbit", "receive_id_type": "chat_id", "receive_id": "", "image": "output/supplier/Fast Rabbit.png"},
+    {"name": "Feng", "receive_id_type": "chat_id", "receive_id": "", "image": "output/supplier/Feng.png"},
+    {"name": "Goose", "receive_id_type": "chat_id", "receive_id": "", "image": "output/supplier/Goose.png"},
+    {"name": "Maximage", "receive_id_type": "chat_id", "receive_id": "", "image": "output/supplier/Maximage.png"},
+    {"name": "PANDA", "receive_id_type": "chat_id", "receive_id": "", "image": "output/supplier/PANDA.png"},
+    {"name": "SAFE", "receive_id_type": "chat_id", "receive_id": "", "image": "output/supplier/SAFE.png"},
+    {"name": "HMT各线路预测", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/HMT各线路预测.png"},
+    {"name": "NPL_HST各线路预测", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/NPL_HST各线路预测.png"},
+    {"name": "RTR各线路预测", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/RTR各线路预测.png"},
+    {"name": "TRG各线路预测", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/TRG各线路预测.png"},
+    {"name": "WGR各线路预测", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/WGR各线路预测.png"},
+    {"name": "WLT各线路预测", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/WLT各线路预测.png"},
+    {"name": "非奥克兰总览", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/非奥克兰总览.png"}
+  ]
+}
+

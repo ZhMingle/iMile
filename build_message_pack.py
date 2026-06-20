@@ -69,7 +69,7 @@ def clean_route_code(value):
 
 
 def is_route_code(value):
-    return any(char.isdigit() for char in value)
+    return value == "HST" or any(char.isdigit() for char in value)
 
 
 def clean_number(value):

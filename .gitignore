@@ -7,3 +7,7 @@ input/*
 !input/.gitkeep
 output/*
 !output/.gitkeep
+build/
+dist/
+*.spec
+.build_runtime/
