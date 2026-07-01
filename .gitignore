@@ -9,5 +9,7 @@ output/*
 !output/.gitkeep
 build/
 dist/
+web/dist/
+web/node_modules/
 *.spec
 .build_runtime/

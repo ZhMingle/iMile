@@ -326,6 +326,22 @@ Webhook 发送的消息不会记录可撤回的 `message_id`，所以这套撤�
 python getTrakingNum.py
 ```
 
+#### 8. 使用网页版提取单号
+
+网页版目前只包含 `getTrakingNum` 功能：上传 `.xls` / `.xlsx` 文件后，点击按钮会自动提取并复制单号。
+
+```powershell
+cd web
+npm install
+npm run dev
+```
+
+打开终端显示的本地地址，例如：
+
+```text
+http://127.0.0.1:5173/
+```
+
 输出：
 
 ```text
