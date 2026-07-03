@@ -31,6 +31,17 @@ MERCHANT_CODES = {
 CAINIAO_MERCHANT_CODE = MERCHANT_CODES["CAINIAO"]
 SUNYOU_MERCHANT_CODE = MERCHANT_CODES["SUNYOU"]
 
+NON_AUCKLAND_STATIONS = ["HMT", "TRG", "WLTV2", "NPL", "PMN", "TPO", "RTR", "WGR", "HST"]
+STATION_ALIASES = {
+    "WLTV2": ["WLTV2", "WLT", "AKL-DC"],
+}
+STATION_DISPLAY_ALIASES = {
+    "HMT": "Hamilton",
+    "TRG": "Tauranga",
+    "NPL": "Napier",
+    "RTR": " Rotorua",
+}
+
 
 def clean_text(value):
     if pd.isna(value):
@@ -270,6 +281,63 @@ def find_total_row(ws, column=1, label="总计"):
     raise ValueError(f"Could not find {label} in {ws.title}")
 
 
+def copy_cell_style(source_cell, target_cell):
+    for attr in ["fill", "font", "border", "alignment", "number_format", "protection"]:
+        setattr(target_cell, attr, copy(getattr(source_cell, attr)))
+
+
+def station_count(counts, station):
+    aliases = STATION_ALIASES.get(station, [station])
+    return sum(counts.get(alias, 0) for alias in aliases)
+
+
+def ensure_non_auckland_station_rows(ws):
+    current_total_row = find_total_row(ws, column=1)
+    target_total_row = 3 + len(NON_AUCKLAND_STATIONS)
+    total_label = ws.cell(current_total_row, 1).value
+    existing_station_values = {}
+    for row in range(3, current_total_row):
+        station = clean_text(ws.cell(row, 1).value)
+        if station == "WLT":
+            station = "WLTV2"
+        if station:
+            existing_station_values[station] = [ws.cell(row, col).value for col in range(4, 6)]
+    total_styles = []
+    for col in range(1, 8):
+        source_cell = ws.cell(current_total_row, col)
+        total_styles.append(
+            {
+                attr: copy(getattr(source_cell, attr))
+                for attr in ["fill", "font", "border", "alignment", "number_format", "protection"]
+            }
+        )
+
+    for row in range(3, target_total_row):
+        style_row = row if row < current_total_row else max(3, current_total_row - 1)
+        for col in range(1, 8):
+            copy_cell_style(ws.cell(style_row, col), ws.cell(row, col))
+
+    if current_total_row != target_total_row:
+        for col in range(1, 8):
+            ws.cell(target_total_row, col).value = None
+            if current_total_row < target_total_row:
+                ws.cell(current_total_row, col).value = None
+
+    for col, style in enumerate(total_styles, start=1):
+        target_cell = ws.cell(target_total_row, col)
+        for attr, value in style.items():
+            setattr(target_cell, attr, copy(value))
+
+    for row, station in enumerate(NON_AUCKLAND_STATIONS, start=3):
+        ws.cell(row, 1).value = station
+        ws.cell(row, 2).value = STATION_DISPLAY_ALIASES.get(station)
+        for col, value in zip(range(4, 6), existing_station_values.get(station, [None, None])):
+            ws.cell(row, col).value = value
+
+    ws.cell(target_total_row, 1).value = total_label
+    return target_total_row
+
+
 def rebuild_non_auckland_pivot(wb, station_counts):
     ws = wb["非奥克兰透视"]
     clear_range(ws, 1, max(ws.max_row, len(station_counts) + 4), 1, 2)
@@ -311,7 +379,7 @@ def rebuild_auckland_pivot(wb, route_counts):
         (30, 31, 7, 8),   # RTR
         (29, 34, 10, 11), # TRG
         (40, 47, 10, 11), # NPL/HST
-        (9, 21, 13, 14),  # WLT
+        (9, 21, 13, 14),  # WLTV2
     ]
     for start_row, end_row, route_col, qty_col in route_table_ranges:
         for row in range(start_row, end_row + 1):
@@ -340,19 +408,19 @@ def update_non_auckland_sheet(wb, station_counts, cainiao_counts, sunyou_counts,
     ws = wb["非奥克兰"]
     ws.cell(1, 1).value = f"{REPORT_DATE}非奥克兰到件货量"
     ws.cell(1, 9).value = REPORT_DATE
-    total_row = find_total_row(ws, column=1)
+    total_row = ensure_non_auckland_station_rows(ws)
 
     for row in range(3, total_row):
         station = clean_text(ws.cell(row, 1).value)
         alias = clean_text(ws.cell(row, 2).value)
 
-        arrival = station_counts.get(station, 0) + station_counts.get(alias, 0)
+        arrival = station_count(station_counts, station) + station_counts.get(alias, 0)
         if station == "RTR":
             arrival = sum(count for key, count in station_counts.items() if key.startswith("RTR"))
 
         ws.cell(row, 3).value = arrival
-        ws.cell(row, 6).value = cainiao_counts.get(station, 0)
-        ws.cell(row, 7).value = sunyou_counts.get(station, 0)
+        ws.cell(row, 6).value = station_count(cainiao_counts, station)
+        ws.cell(row, 7).value = station_count(sunyou_counts, station)
 
     non_auckland_total = sum(ws.cell(row, 3).value or 0 for row in range(3, total_row))
     cainiao_total = sum(ws.cell(row, 6).value or 0 for row in range(3, total_row))
@@ -425,13 +493,22 @@ def round_excel(value, digits=2):
     return round(float(value), digits)
 
 
+def copy_board_row_style(ws, source_row, target_row):
+    for col in (8, 9):
+        source_cell = ws.cell(source_row, col)
+        target_cell = ws.cell(target_row, col)
+        for attr in ["fill", "font", "border", "alignment", "number_format", "protection"]:
+            setattr(target_cell, attr, copy(getattr(source_cell, attr)))
+
+
 def write_board_forecast_values(ws):
     base_3l = ws.cell(2, 8).value or 135
     base_5l = ws.cell(13, 8).value or 350
 
+    total_row = find_total_row(ws, column=1)
     arrival_by_station = {
         clean_text(ws.cell(row, 1).value): ws.cell(row, 3).value or 0
-        for row in range(3, 11)
+        for row in range(3, total_row)
     }
 
     rows_3l = {
@@ -440,8 +517,9 @@ def write_board_forecast_values(ws):
         5: "TRG",
         6: "HST",
         7: "NPL",
-        8: "WGR",
-        9: "WLT",
+        8: "TPO",
+        9: "PMN",
+        10: "WLTV2",
     }
     rows_5l = {
         14: "RTR",
@@ -449,21 +527,31 @@ def write_board_forecast_values(ws):
         16: "TRG",
         17: "HST",
         18: "NPL",
-        19: "WGR",
-        20: "WLT",
+        19: "TPO",
+        20: "PMN",
+        21: "WLTV2",
     }
 
+    copy_board_row_style(ws, 10, 11)
+    copy_board_row_style(ws, 9, 10)
+    copy_board_row_style(ws, 21, 22)
+    copy_board_row_style(ws, 20, 21)
+
     for row, station in rows_3l.items():
+        ws.cell(row, 8).value = station
         ws.cell(row, 9).value = round_excel(arrival_by_station.get(station, 0) / base_3l)
 
-    ws.cell(10, 9).value = sum(ws.cell(row, 9).value or 0 for row in [5, 7, 6, 4])
-    ws.cell(10, 9).value = round_excel(ws.cell(10, 9).value)
+    ws.cell(11, 8).value = "总计"
+    ws.cell(11, 9).value = sum(ws.cell(row, 9).value or 0 for row in [4, 5, 6, 7, 8, 9])
+    ws.cell(11, 9).value = round_excel(ws.cell(11, 9).value)
 
     for row, station in rows_5l.items():
+        ws.cell(row, 8).value = station
         ws.cell(row, 9).value = round_excel(arrival_by_station.get(station, 0) / base_5l)
 
-    ws.cell(21, 9).value = sum(ws.cell(row, 9).value or 0 for row in [16, 18, 17, 15])
-    ws.cell(21, 9).value = round_excel(ws.cell(21, 9).value)
+    ws.cell(22, 8).value = "总计"
+    ws.cell(22, 9).value = sum(ws.cell(row, 9).value or 0 for row in [15, 16, 17, 18, 19, 20])
+    ws.cell(22, 9).value = round_excel(ws.cell(22, 9).value)
 
 
 def main():

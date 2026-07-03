@@ -133,7 +133,7 @@ output/query_list.txt
 常见派件网点简码包括：
 
 ```text
-AKL, HMT, TRG, WLT, NPL, PMN, RTR, WGR, HST
+AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST
 ```
 
 其中：
@@ -480,7 +480,7 @@ The script picks the latest valid workbook. Required columns:
 Common station codes:
 
 ```text
-AKL, HMT, TRG, WLT, NPL, PMN, RTR, WGR, HST
+AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST
 ```
 
 Rules:

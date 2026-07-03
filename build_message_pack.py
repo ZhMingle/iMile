@@ -360,19 +360,22 @@ def build_supplier_messages():
 def build_non_auckland_messages():
     df = pd.read_excel(REPORT_FILE, sheet_name="非奥克兰", header=None, dtype=str).fillna("")
 
-    overview = df.iloc[2:11, [0, 2, 5, 6]].copy()
+    total_rows = df.index[df.iloc[:, 0].map(clean_text).eq("总计")]
+    total_row = int(total_rows[0]) if not total_rows.empty else 10
+
+    overview = df.iloc[2 : total_row + 1, [0, 2, 5, 6]].copy()
     overview.columns = ["station", "arrival_volume", "cainiao_volume", "sunyou_volume"]
     overview["station"] = overview["station"].map(clean_text)
     overview["arrival_volume"] = overview["arrival_volume"].map(clean_number)
     overview["cainiao_volume"] = overview["cainiao_volume"].map(clean_number)
     overview["sunyou_volume"] = overview["sunyou_volume"].map(clean_number)
 
-    board_3l = df.iloc[2:10, [7, 8]].copy()
+    board_3l = df.iloc[2:11, [7, 8]].copy()
     board_3l.columns = ["station", "boards"]
     board_3l["station"] = board_3l["station"].map(clean_text)
     board_3l["boards"] = board_3l["boards"].map(clean_number)
 
-    board_5l = df.iloc[13:21, [7, 8]].copy()
+    board_5l = df.iloc[13:22, [7, 8]].copy()
     board_5l.columns = ["station", "boards"]
     board_5l["station"] = board_5l["station"].map(clean_text)
     board_5l["boards"] = board_5l["boards"].map(clean_number)
@@ -415,7 +418,7 @@ def build_route_detail_messages():
         "RTR": (30, 31, 7, 8),
         "TRG": (29, 34, 10, 11),
         "NPL_HST": (40, 47, 10, 11),
-        "WLT": (9, 21, 13, 14),
+        "WLTV2": (9, 21, 13, 14),
     }
 
     details_by_name = {}

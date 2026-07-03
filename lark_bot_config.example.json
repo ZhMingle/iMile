@@ -18,8 +18,7 @@
     {"name": "RTR各线路预测", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/RTR各线路预测.png"},
     {"name": "TRG各线路预测", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/TRG各线路预测.png"},
     {"name": "WGR各线路预测", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/WGR各线路预测.png"},
-    {"name": "WLT各线路预测", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/WLT各线路预测.png"},
+    {"name": "WLTV2各线路预测", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/WLTV2各线路预测.png"},
     {"name": "非奥克兰总览", "receive_id_type": "chat_id", "receive_id": "", "image": "output/province/非奥克兰总览.png"}
   ]
 }
-
