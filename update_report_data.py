@@ -41,6 +41,9 @@ STATION_DISPLAY_ALIASES = {
     "NPL": "Napier",
     "RTR": " Rotorua",
 }
+AUCKLAND_ROUTE_SUPPLIERS = {
+    "601": "Good Day Removals Ltd",
+}
 
 
 def clean_text(value):
@@ -398,6 +401,8 @@ def update_auckland_sheet(wb, route_counts):
         route_code = clean_route_code(ws.cell(row, 1).value)
         if route_code:
             ws.cell(row, 3).value = route_counts.get(route_code, 0)
+            if route_code in AUCKLAND_ROUTE_SUPPLIERS:
+                ws.cell(row, 7).value = AUCKLAND_ROUTE_SUPPLIERS[route_code]
 
     total = sum(ws.cell(row, 3).value or 0 for row in range(3, total_row))
     ws.cell(total_row, 3).value = total

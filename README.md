@@ -380,6 +380,8 @@ output/province/
 非奥克兰总览.png
 HMT各线路预测.png
 TRG各线路预测.png
+PMN各线路预测.png
+TPO各线路预测.png
 NPL_HST各线路预测.png
 ```
 
