@@ -42,6 +42,7 @@ STATION_DISPLAY_ALIASES = {
     "RTR": " Rotorua",
 }
 AUCKLAND_ROUTE_SUPPLIERS = {
+    "406": "Feng",
     "601": "Good Day Removals Ltd",
 }
 

@@ -86,7 +86,7 @@ def load_config(path):
         raise FileNotFoundError(
             f"Missing {path}. Copy lark_config.example.json to {path} and fill in real values."
         )
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
 def save_config(path, config):

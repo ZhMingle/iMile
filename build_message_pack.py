@@ -404,38 +404,40 @@ def build_non_auckland_messages():
 
 def build_route_detail_messages():
     wb = load_workbook(REPORT_FILE, data_only=False, read_only=True)
-    ws = wb["奥克兰透视"]
     source_ws = wb["数据源1-预测"]
-    route_counts = {}
-    for (route_code,) in source_ws.iter_rows(min_row=2, min_col=2, max_col=2, values_only=True):
+    route_counts_by_station = {}
+    for route_code, station in source_ws.iter_rows(
+        min_row=2, min_col=2, max_col=3, values_only=True
+    ):
         route_code = clean_route_code(route_code)
-        if route_code:
-            route_counts[route_code] = route_counts.get(route_code, 0) + 1
+        station = clean_text(station).upper()
+        if route_code and station:
+            station_counts = route_counts_by_station.setdefault(station, {})
+            station_counts[route_code] = station_counts.get(route_code, 0) + 1
 
-    ranges = {
-        "WGR": (8, 9, 6, 7),
-        "HMT": (9, 24, 10, 11),
-        "PMN": (116, 117, 1, 2),
-        "RTR": (30, 31, 7, 8),
-        "TPO": (120, 120, 1, 2),
-        "TRG": (29, 34, 10, 11),
-        "NPL_HST": (40, 47, 10, 11),
-        "WLTV2": (9, 21, 13, 14),
+    stations_by_message = {
+        "WGR": ("WGR",),
+        "HMT": ("HMT",),
+        "PMN": ("PMN",),
+        "RTR": ("RTR",),
+        "TPO": ("TPO",),
+        "TRG": ("TRG",),
+        "NPL_HST": ("NPL", "HST"),
+        "WLTV2": ("WLTV2",),
     }
 
     details_by_name = {}
 
-    for name, (start, end, route_col, qty_col) in ranges.items():
-        rows = []
-        for row in range(start, end + 1):
-            route_code = clean_route_code(ws.cell(row, route_col).value)
-            quantity_value = ws.cell(row, qty_col).value
-            if isinstance(quantity_value, str) and quantity_value.startswith("="):
-                quantity = route_counts.get(route_code, 0)
-            else:
-                quantity = clean_number(quantity_value)
-            if is_route_code(route_code):
-                rows.append({"route_code": route_code, "quantity": quantity})
+    for name, stations in stations_by_message.items():
+        combined_counts = {}
+        for station in stations:
+            for route_code, quantity in route_counts_by_station.get(station, {}).items():
+                combined_counts[route_code] = combined_counts.get(route_code, 0) + quantity
+        rows = [
+            {"route_code": route_code, "quantity": quantity}
+            for route_code, quantity in sorted(combined_counts.items())
+            if is_route_code(route_code)
+        ]
 
         detail = pd.DataFrame(rows, columns=["route_code", "quantity"])
         details_by_name[name] = detail
