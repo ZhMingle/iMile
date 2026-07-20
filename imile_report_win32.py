@@ -7,7 +7,7 @@ import sys
 import threading
 import traceback
 
-from app_workflows import run_report, run_tracking
+from app_workflows import open_wecom_config, run_report, run_tracking, run_wecom_download
 
 
 user32 = ctypes.windll.user32
@@ -43,6 +43,8 @@ IDC_ARROW = 32512
 
 ID_TRACKING = 1001
 ID_REPORT = 1002
+ID_WECOM_DOWNLOAD = 1003
+ID_WECOM_SETTINGS = 1004
 
 
 WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
@@ -110,6 +112,8 @@ class IMileWin32App:
         self.hwnd = None
         self.tracking_button = None
         self.report_button = None
+        self.wecom_button = None
+        self.wecom_settings_button = None
         self.status = None
         self.log = None
         self.busy = False
@@ -182,29 +186,49 @@ class IMileWin32App:
             user32.SendMessageW(title, WM_SETFONT, self.title_font, True)
             self._create_control(
                 "STATIC",
-                "提取运单号 · 生成并通过 Lark 机器人发送报表",
+                "自动收取 TEMU 文件 · 提取运单号 · 生成并通过 Lark 机器人发送报表",
                 SS_LEFT,
                 36,
                 68,
                 650,
                 28,
             )
-            self.tracking_button = self._create_control(
+            self.wecom_button = self._create_control(
                 "BUTTON",
-                "Get Tracking Num  |  选择文件并提取",
+                "① 开始自动收件  |  从企业微信下载 TEMU 文件",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 36,
                 120,
+                650,
+                62,
+                ID_WECOM_DOWNLOAD,
+            )
+            self.wecom_settings_button = self._create_control(
+                "BUTTON",
+                "收件设置",
+                BS_PUSHBUTTON | WS_TABSTOP,
+                704,
+                120,
+                144,
+                62,
+                ID_WECOM_SETTINGS,
+            )
+            self.tracking_button = self._create_control(
+                "BUTTON",
+                "② Get Tracking Num  |  选择文件并提取",
+                BS_PUSHBUTTON | WS_TABSTOP,
+                36,
+                200,
                 390,
                 62,
                 ID_TRACKING,
             )
             self.report_button = self._create_control(
                 "BUTTON",
-                "发送报表  |  生成并由机器人发送",
+                "③ 发送报表  |  生成并由机器人发送",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 458,
-                120,
+                200,
                 390,
                 62,
                 ID_REPORT,
@@ -214,24 +238,32 @@ class IMileWin32App:
                 "就绪 · 机器人模式，不使用个人 Lark 身份",
                 SS_LEFT,
                 36,
-                205,
+                285,
                 812,
                 28,
             )
-            self._create_control("STATIC", "运行记录", SS_LEFT, 36, 240, 120, 24)
+            self._create_control("STATIC", "运行记录", SS_LEFT, 36, 320, 120, 24)
             self.log = self._create_control(
                 "EDIT",
                 "",
                 WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
                 36,
-                270,
+                350,
                 812,
-                305,
+                225,
             )
             return 0
         if msg == WM_COMMAND:
             command_id = int(wparam) & 0xFFFF
-            if command_id == ID_TRACKING and not self.busy:
+            if command_id == ID_WECOM_DOWNLOAD and not self.busy:
+                self._start("正在从企业微信收取 TEMU 文件…", run_wecom_download)
+            elif command_id == ID_WECOM_SETTINGS and not self.busy:
+                try:
+                    path = open_wecom_config()
+                    user32.SetWindowTextW(self.status, f"已打开收件配置：{path.name}")
+                except Exception as exc:
+                    user32.MessageBoxW(self.hwnd, str(exc), "无法打开配置", 0x10)
+            elif command_id == ID_TRACKING and not self.busy:
                 files = self._file_dialog(True, "选择需要提取运单号的 Excel 文件", "Excel 文件\0*.xls;*.xlsx\0所有文件\0*.*\0")
                 if files:
                     self._start("正在提取运单号…", run_tracking, files)
@@ -271,6 +303,8 @@ class IMileWin32App:
 
     def _start(self, status, function, *args):
         self.busy = True
+        user32.EnableWindow(self.wecom_button, False)
+        user32.EnableWindow(self.wecom_settings_button, False)
         user32.EnableWindow(self.tracking_button, False)
         user32.EnableWindow(self.report_button, False)
         user32.SetWindowTextW(self.status, status)
@@ -298,6 +332,8 @@ class IMileWin32App:
                 self._append_log(payload.replace("\n", "\r\n"))
             elif kind in {"success", "error"}:
                 self.busy = False
+                user32.EnableWindow(self.wecom_button, True)
+                user32.EnableWindow(self.wecom_settings_button, True)
                 user32.EnableWindow(self.tracking_button, True)
                 user32.EnableWindow(self.report_button, True)
                 prefix = "完成 · " if kind == "success" else "失败 · "
@@ -313,4 +349,3 @@ class IMileWin32App:
 
 if __name__ == "__main__":
     IMileWin32App().run()
-

@@ -56,6 +56,7 @@ def main(excel_files=None):
             [
                 *(file for file in INPUT_FOLDER.glob("*.xls") if not file.name.startswith("~$")),
                 *(file for file in INPUT_FOLDER.glob("*.xlsx") if not file.name.startswith("~$")),
+                *(file for file in INPUT_FOLDER.glob("*.csv") if not file.name.startswith("~$")),
             ]
         )
     else:
@@ -66,7 +67,10 @@ def main(excel_files=None):
 
     for file in excel_files:
         try:
-            df = pd.read_excel(file, dtype=str)
+            if file.suffix.lower() == ".csv":
+                df = pd.read_csv(file, dtype=str, encoding_errors="replace")
+            else:
+                df = pd.read_excel(file, dtype=str)
         except Exception as exc:
             print(f"Error reading {file.name}: {exc}")
             continue

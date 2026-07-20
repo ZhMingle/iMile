@@ -46,6 +46,23 @@ def run_tracking(files):
     return f"已提取 {count} 个唯一运单号，并复制到剪贴板。"
 
 
+def run_wecom_download():
+    module = importlib.import_module("wecom_downloader")
+    return module.download_temu_files()
+
+
+def open_wecom_config():
+    module = importlib.import_module("wecom_downloader")
+    if not module.CONFIG_PATH.exists():
+        if not module.EXAMPLE_CONFIG_PATH.exists():
+            raise RuntimeError("找不到企业微信配置模板。")
+        shutil.copy2(module.EXAMPLE_CONFIG_PATH, module.CONFIG_PATH)
+    if sys.platform != "win32":
+        raise RuntimeError(f"请编辑配置文件：{module.CONFIG_PATH}")
+    os.startfile(module.CONFIG_PATH)
+    return module.CONFIG_PATH
+
+
 def run_report(source_file):
     messages = configured_bot_messages()
     print(f"Robot destinations configured: {len(messages)}")

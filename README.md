@@ -65,6 +65,24 @@ The redirect URL must be added in the Feishu Developer Console. The app also nee
 
 项目适合每天重复使用，减少人工统计、截图和逐群复制粘贴图片的工作量。
 
+### 企业微信自动收取 TEMU 文件（Windows）
+
+Windows 版「iMile 报表助手」顶部提供“开始自动收件”按钮。第一版会搜索配置好的
+企业微信会话，下载当前画面中可见的 `.xls`、`.xlsx`、`.csv`、`.zip` 附件，按日期归档到
+`input/TEMU/`，用文件 SHA-256 去重，并自动从新增 Excel 中提取运单号。
+
+首次使用：
+
+1. 安装并登录企业微信 Windows 客户端。
+2. 在助手中点击“收件设置”。
+3. 在 `wecom_download_config.json` 中填写准确的 `chat_name` 和企业微信实际下载目录。
+4. 打开企业微信，并确保目标会话中的附件已经滚动到当前画面附近。
+5. 回到助手点击“开始自动收件”。运行期间不要操作鼠标或键盘。
+
+配置示例见 `wecom_download_config.example.json`。该功能使用 Windows 桌面自动化，企业微信
+界面升级后可能需要重新适配；如果提示已点击但没有发现新文件，先核对下载目录，并确认企业
+微信是否弹出了额外的下载确认按钮。
+
 ### 目录结构
 
 ```text

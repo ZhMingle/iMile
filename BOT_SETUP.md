@@ -8,3 +8,11 @@
 
 应用仅发送 `send_as: "app"` 的消息，不使用个人账号授权。
 
+## 企业微信 TEMU 自动收件
+
+1. 安装依赖：`python -m pip install -r requirements.txt`。
+2. 重新运行 `build_windows_app.bat`。
+3. 打开程序后点击“收件设置”，填写 TEMU 会话名称和企业微信下载目录。
+4. 保持企业微信已登录，目标附件在会话当前画面可见，然后点击“开始自动收件”。
+
+程序会将文件按日期归档到 `input/TEMU/`，并在 `.downloaded_files.json` 中记录文件哈希以避免重复处理。

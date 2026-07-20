@@ -1,0 +1,8 @@
+{
+  "chat_name": "TEMU 文件群",
+  "download_dir": "%USERPROFILE%/Downloads",
+  "archive_dir": "input/TEMU",
+  "allowed_extensions": [".xls", ".xlsx", ".csv", ".zip"],
+  "download_timeout_seconds": 90,
+  "auto_extract_tracking": true
+}
