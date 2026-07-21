@@ -47,8 +47,15 @@ def run_tracking(files):
 
 
 def run_wecom_download():
+    print("自动收件任务已启动。")
     module = importlib.import_module("wecom_downloader")
     return module.download_temu_files()
+
+
+def run_dc_export():
+    module = importlib.import_module("imile_dc_downloader")
+    target = module.download_center_waybill_query()
+    return f"中心运单查询已下载并校验：{target.name}"
 
 
 def open_wecom_config():

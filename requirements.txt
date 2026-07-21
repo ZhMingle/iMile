@@ -3,3 +3,6 @@ openpyxl
 Pillow
 xlrd
 pywinauto; sys_platform == "win32"
+rapidocr; sys_platform == "win32"
+onnxruntime; sys_platform == "win32"
+pyinstaller; sys_platform == "win32"

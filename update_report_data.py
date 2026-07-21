@@ -22,6 +22,21 @@ BASE_COLUMNS = ["运单号", "路由码", "派件网点简码"]
 MERCHANT_COLUMN = "商家编号"
 REQUIRED_COLUMNS = [*BASE_COLUMNS, MERCHANT_COLUMN]
 TEMPLATE_REQUIRED_COLUMNS = BASE_COLUMNS
+SOURCE_COLUMN_KEY_MAP = {
+    "运单号": "运单号",
+    "waybillnumber": "运单号",
+    "trackingnumber": "运单号",
+    "路由码": "路由码",
+    "routingcode": "路由码",
+    "routecode": "路由码",
+    "派件网点简码": "派件网点简码",
+    "deliverystationscode": "派件网点简码",
+    "deliverystationcode": "派件网点简码",
+    "dispatchstationcode": "派件网点简码",
+    "商家编号": "商家编号",
+    "clientcode": "商家编号",
+    "merchantcode": "商家编号",
+}
 
 MERCHANT_CODES = {
     "TEMU": "C2103951401",
@@ -55,6 +70,12 @@ def clean_text(value):
 
 def clean_route_code(value):
     return re.sub(r"\s+", "", clean_text(value))
+
+
+def canonical_source_column(value):
+    original = clean_text(value)
+    key = re.sub(r"[^0-9a-z\u4e00-\u9fff]+", "", original.lower())
+    return SOURCE_COLUMN_KEY_MAP.get(key, original)
 
 
 def is_route_code(value):
@@ -113,39 +134,43 @@ def read_source_xlsx(path):
     shared_strings = []
     with zipfile.ZipFile(path) as archive:
         if "xl/sharedStrings.xml" in archive.namelist():
-            for event, element in ET.iterparse(archive.open("xl/sharedStrings.xml"), events=("end",)):
-                if element.tag.endswith("}si"):
-                    shared_strings.append("".join(text.text or "" for text in element.iter() if text.tag.endswith("}t")))
-                    element.clear()
+            with archive.open("xl/sharedStrings.xml") as shared_stream:
+                for event, element in ET.iterparse(shared_stream, events=("end",)):
+                    if element.tag.endswith("}si"):
+                        shared_strings.append("".join(text.text or "" for text in element.iter() if text.tag.endswith("}t")))
+                        element.clear()
 
         sheet_name = get_first_sheet_path(archive)
         required_indexes = None
         rows = []
 
-        for event, row_element in ET.iterparse(archive.open(sheet_name), events=("end",)):
-            if not row_element.tag.endswith("}row"):
-                continue
-
-            row_number = int(row_element.attrib.get("r", "0"))
-            values_by_col = {}
-            for cell in row_element:
-                if not cell.tag.endswith("}c"):
+        with archive.open(sheet_name) as sheet_stream:
+            for event, row_element in ET.iterparse(sheet_stream, events=("end",)):
+                if not row_element.tag.endswith("}row"):
                     continue
-                col_index = column_index_from_cell_ref(cell.attrib.get("r", ""))
-                values_by_col[col_index] = read_cell_value(cell, shared_strings)
 
-            if row_number == 1:
-                header_to_index = {clean_text(value): col for col, value in values_by_col.items()}
-                required_indexes = {column: header_to_index[column] for column in REQUIRED_COLUMNS if column in header_to_index}
-            elif required_indexes:
-                row = {
-                    column: clean_text(values_by_col.get(col_index, ""))
-                    for column, col_index in required_indexes.items()
-                }
-                if row.get("运单号"):
-                    rows.append(row)
+                row_number = int(row_element.attrib.get("r", "0"))
+                values_by_col = {}
+                for cell in row_element:
+                    if not cell.tag.endswith("}c"):
+                        continue
+                    col_index = column_index_from_cell_ref(cell.attrib.get("r", ""))
+                    values_by_col[col_index] = read_cell_value(cell, shared_strings)
 
-            row_element.clear()
+                if row_number == 1:
+                    header_to_index = {
+                        canonical_source_column(value): col for col, value in values_by_col.items()
+                    }
+                    required_indexes = {column: header_to_index[column] for column in REQUIRED_COLUMNS if column in header_to_index}
+                elif required_indexes:
+                    row = {
+                        column: clean_text(values_by_col.get(col_index, ""))
+                        for column, col_index in required_indexes.items()
+                    }
+                    if row.get("运单号"):
+                        rows.append(row)
+
+                row_element.clear()
 
     return pd.DataFrame(rows, columns=[column for column in REQUIRED_COLUMNS if rows and column in rows[0]] or REQUIRED_COLUMNS)
 

@@ -7,7 +7,13 @@ import sys
 import threading
 import traceback
 
-from app_workflows import open_wecom_config, run_report, run_tracking, run_wecom_download
+from app_workflows import (
+    open_wecom_config,
+    run_dc_export,
+    run_report,
+    run_tracking,
+    run_wecom_download,
+)
 
 
 user32 = ctypes.windll.user32
@@ -45,6 +51,7 @@ ID_TRACKING = 1001
 ID_REPORT = 1002
 ID_WECOM_DOWNLOAD = 1003
 ID_WECOM_SETTINGS = 1004
+ID_DC_EXPORT = 1005
 
 
 WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
@@ -93,12 +100,71 @@ class OPENFILENAMEW(ctypes.Structure):
     ]
 
 
+def _configure_win32_api():
+    lresult = ctypes.c_ssize_t
+    kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+    kernel32.GetModuleHandleW.restype = wintypes.HINSTANCE
+
+    user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
+    user32.RegisterClassW.restype = wintypes.WORD
+    user32.LoadCursorW.restype = wintypes.HANDLE
+    user32.CreateWindowExW.argtypes = [
+        wintypes.DWORD,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.HWND,
+        wintypes.HANDLE,
+        wintypes.HINSTANCE,
+        wintypes.LPVOID,
+    ]
+    user32.CreateWindowExW.restype = wintypes.HWND
+    user32.DefWindowProcW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.DefWindowProcW.restype = lresult
+    user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.SendMessageW.restype = lresult
+    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    user32.PostMessageW.restype = wintypes.BOOL
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.ShowWindow.restype = wintypes.BOOL
+    user32.UpdateWindow.argtypes = [wintypes.HWND]
+    user32.UpdateWindow.restype = wintypes.BOOL
+    user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
+    user32.GetMessageW.restype = wintypes.BOOL
+    user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+    user32.TranslateMessage.restype = wintypes.BOOL
+    user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+    user32.DispatchMessageW.restype = lresult
+    user32.SetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPCWSTR]
+    user32.SetWindowTextW.restype = wintypes.BOOL
+    user32.EnableWindow.argtypes = [wintypes.HWND, wintypes.BOOL]
+    user32.EnableWindow.restype = wintypes.BOOL
+    user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+    user32.GetWindowTextLengthW.restype = ctypes.c_int
+    user32.MessageBoxW.argtypes = [wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.UINT]
+    user32.MessageBoxW.restype = ctypes.c_int
+    user32.PostQuitMessage.argtypes = [ctypes.c_int]
+    user32.PostQuitMessage.restype = None
+
+    gdi32.CreateFontW.restype = wintypes.HANDLE
+    comdlg32.GetOpenFileNameW.argtypes = [ctypes.POINTER(OPENFILENAMEW)]
+    comdlg32.GetOpenFileNameW.restype = wintypes.BOOL
+
+
+_configure_win32_api()
+
+
 class QueueWriter:
     def __init__(self, app):
         self.app = app
 
     def write(self, text):
         if text:
+            text = str(text).replace("\x1b[32m", "").replace("\x1b[0m", "")
             self.app.events.put(("log", text))
             user32.PostMessageW(self.app.hwnd, WM_APP_UPDATE, 0, 0)
         return len(text)
@@ -114,6 +180,7 @@ class IMileWin32App:
         self.report_button = None
         self.wecom_button = None
         self.wecom_settings_button = None
+        self.dc_export_button = None
         self.status = None
         self.log = None
         self.busy = False
@@ -146,7 +213,7 @@ class IMileWin32App:
             100,
             80,
             920,
-            650,
+            730,
             None,
             None,
             instance,
@@ -182,11 +249,12 @@ class IMileWin32App:
 
     def _wndproc(self, hwnd, msg, wparam, lparam):
         if msg == 1:  # WM_CREATE
+            self.hwnd = hwnd
             title = self._create_control("STATIC", "iMile 报表助手", SS_LEFT, 34, 22, 500, 44)
             user32.SendMessageW(title, WM_SETFONT, self.title_font, True)
             self._create_control(
                 "STATIC",
-                "自动收取 TEMU 文件 · 提取运单号 · 生成并通过 Lark 机器人发送报表",
+                "WISEWAY 日常收件 · Auslink 偶发顺友 · 提取运单号 · 下载中心运单查询",
                 SS_LEFT,
                 36,
                 68,
@@ -195,7 +263,7 @@ class IMileWin32App:
             )
             self.wecom_button = self._create_control(
                 "BUTTON",
-                "① 开始自动收件  |  从企业微信下载 TEMU 文件",
+                "① 自动收件  |  WISEWAY 主群（Auslink 备用）",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 36,
                 120,
@@ -215,7 +283,7 @@ class IMileWin32App:
             )
             self.tracking_button = self._create_control(
                 "BUTTON",
-                "② Get Tracking Num  |  选择文件并提取",
+                "② 手动提取运单号",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 36,
                 200,
@@ -223,32 +291,42 @@ class IMileWin32App:
                 62,
                 ID_TRACKING,
             )
-            self.report_button = self._create_control(
+            self.dc_export_button = self._create_control(
                 "BUTTON",
-                "③ 发送报表  |  生成并由机器人发送",
+                "③ 重试中心运单导出",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 458,
                 200,
                 390,
                 62,
+                ID_DC_EXPORT,
+            )
+            self.report_button = self._create_control(
+                "BUTTON",
+                "④ 发送报表  |  生成并由机器人发送",
+                BS_PUSHBUTTON | WS_TABSTOP,
+                36,
+                280,
+                812,
+                62,
                 ID_REPORT,
             )
             self.status = self._create_control(
                 "STATIC",
-                "就绪 · 机器人模式，不使用个人 Lark 身份",
+                "就绪 · 日常请先打开 iMile x WISEWAY 主群",
                 SS_LEFT,
                 36,
-                285,
+                365,
                 812,
                 28,
             )
-            self._create_control("STATIC", "运行记录", SS_LEFT, 36, 320, 120, 24)
+            self._create_control("STATIC", "运行记录", SS_LEFT, 36, 400, 120, 24)
             self.log = self._create_control(
                 "EDIT",
                 "",
                 WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
                 36,
-                350,
+                430,
                 812,
                 225,
             )
@@ -256,7 +334,7 @@ class IMileWin32App:
         if msg == WM_COMMAND:
             command_id = int(wparam) & 0xFFFF
             if command_id == ID_WECOM_DOWNLOAD and not self.busy:
-                self._start("正在从企业微信收取 TEMU 文件…", run_wecom_download)
+                self._start("正在识别当前群并下载对应附件…", run_wecom_download)
             elif command_id == ID_WECOM_SETTINGS and not self.busy:
                 try:
                     path = open_wecom_config()
@@ -267,6 +345,8 @@ class IMileWin32App:
                 files = self._file_dialog(True, "选择需要提取运单号的 Excel 文件", "Excel 文件\0*.xls;*.xlsx\0所有文件\0*.*\0")
                 if files:
                     self._start("正在提取运单号…", run_tracking, files)
+            elif command_id == ID_DC_EXPORT and not self.busy:
+                self._start("正在查询并下载中心运单查询…", run_dc_export)
             elif command_id == ID_REPORT and not self.busy:
                 files = self._file_dialog(False, "选择中心运单查询 Excel", "Excel 文件\0*.xlsx\0所有文件\0*.*\0")
                 if files:
@@ -306,6 +386,7 @@ class IMileWin32App:
         user32.EnableWindow(self.wecom_button, False)
         user32.EnableWindow(self.wecom_settings_button, False)
         user32.EnableWindow(self.tracking_button, False)
+        user32.EnableWindow(self.dc_export_button, False)
         user32.EnableWindow(self.report_button, False)
         user32.SetWindowTextW(self.status, status)
         self._append_log("\r\n" + "=" * 64 + "\r\n")
@@ -335,6 +416,7 @@ class IMileWin32App:
                 user32.EnableWindow(self.wecom_button, True)
                 user32.EnableWindow(self.wecom_settings_button, True)
                 user32.EnableWindow(self.tracking_button, True)
+                user32.EnableWindow(self.dc_export_button, True)
                 user32.EnableWindow(self.report_button, True)
                 prefix = "完成 · " if kind == "success" else "失败 · "
                 user32.SetWindowTextW(self.status, prefix + payload)
@@ -344,7 +426,13 @@ class IMileWin32App:
     def _append_log(self, text):
         length = user32.GetWindowTextLengthW(self.log)
         user32.SendMessageW(self.log, EM_SETSEL, length, length)
-        user32.SendMessageW(self.log, EM_REPLACESEL, False, text)
+        text_buffer = ctypes.create_unicode_buffer(text)
+        user32.SendMessageW(
+            self.log,
+            EM_REPLACESEL,
+            False,
+            ctypes.addressof(text_buffer),
+        )
 
 
 if __name__ == "__main__":

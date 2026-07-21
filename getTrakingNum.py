@@ -53,17 +53,17 @@ def main(excel_files=None):
     all_numbers = []
     if excel_files is None:
         excel_files = sorted(
-            [
-                *(file for file in INPUT_FOLDER.glob("*.xls") if not file.name.startswith("~$")),
-                *(file for file in INPUT_FOLDER.glob("*.xlsx") if not file.name.startswith("~$")),
-                *(file for file in INPUT_FOLDER.glob("*.csv") if not file.name.startswith("~$")),
-            ]
+            file
+            for file in INPUT_FOLDER.rglob("*")
+            if file.is_file()
+            and file.suffix.lower() in {".xls", ".xlsx", ".csv"}
+            and not file.name.startswith("~$")
         )
     else:
         excel_files = [Path(file) for file in excel_files if not Path(file).name.startswith("~$")]
 
     if not excel_files:
-        raise RuntimeError(f"No Excel files found in {INPUT_FOLDER.resolve()}")
+        raise RuntimeError(f"No Excel or CSV files found in {INPUT_FOLDER.resolve()}")
 
     for file in excel_files:
         try:
