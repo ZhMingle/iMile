@@ -49,6 +49,7 @@ SUNYOU_MERCHANT_CODE = MERCHANT_CODES["SUNYOU"]
 NON_AUCKLAND_STATIONS = ["HMT", "TRG", "WLTV2", "NPL", "PMN", "TPO", "RTR", "WGR", "HST"]
 STATION_ALIASES = {
     "WLTV2": ["WLTV2", "WLT", "AKL-DC"],
+    "PMN": ["PMN", "PMNV2", "Palmerston NorthV2"],
 }
 STATION_DISPLAY_ALIASES = {
     "HMT": "Hamilton",

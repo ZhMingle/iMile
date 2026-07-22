@@ -418,7 +418,7 @@ def build_route_detail_messages():
     stations_by_message = {
         "WGR": ("WGR",),
         "HMT": ("HMT",),
-        "PMN": ("PMN",),
+        "PMN": ("PMN", "PMNV2", "PALMERSTON NORTHV2"),
         "RTR": ("RTR",),
         "TPO": ("TPO",),
         "TRG": ("TRG",),
