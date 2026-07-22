@@ -22,5 +22,9 @@
   "dc_query_timeout_seconds": 120,
   "dc_export_timeout_seconds": 900,
   "dc_poll_interval_seconds": 3,
-  "dc_file_download_timeout_seconds": 120
+  "dc_file_download_timeout_seconds": 120,
+  "dc_dispatch_url": "https://ds.imile.com/#/DSOperation/DispatchManagementNew/BoxPlanning",
+  "dc_dispatch_page_timeout_seconds": 60,
+  "dc_dispatch_action_timeout_seconds": 20,
+  "dc_dispatch_merge_timeout_seconds": 60
 }

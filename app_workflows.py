@@ -58,6 +58,11 @@ def run_dc_export():
     return f"中心运单查询已下载并校验：{target.name}"
 
 
+def run_auto_dispatch(route_code, driver_spec):
+    module = importlib.import_module("imile_dispatcher")
+    return module.dispatch_route(route_code, driver_spec)
+
+
 def open_wecom_config():
     module = importlib.import_module("wecom_downloader")
     if not module.CONFIG_PATH.exists():

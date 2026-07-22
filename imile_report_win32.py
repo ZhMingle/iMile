@@ -9,6 +9,7 @@ import traceback
 
 from app_workflows import (
     open_wecom_config,
+    run_auto_dispatch,
     run_dc_export,
     run_report,
     run_tracking,
@@ -35,6 +36,7 @@ WS_BORDER = 0x00800000
 WS_VSCROLL = 0x00200000
 ES_MULTILINE = 0x0004
 ES_AUTOVSCROLL = 0x0040
+ES_AUTOHSCROLL = 0x0080
 ES_READONLY = 0x0800
 BS_PUSHBUTTON = 0x00000000
 SS_LEFT = 0x00000000
@@ -52,6 +54,9 @@ ID_REPORT = 1002
 ID_WECOM_DOWNLOAD = 1003
 ID_WECOM_SETTINGS = 1004
 ID_DC_EXPORT = 1005
+ID_DISPATCH_ROUTE = 1006
+ID_DISPATCH_DRIVER = 1007
+ID_AUTO_DISPATCH = 1008
 
 
 WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
@@ -145,6 +150,8 @@ def _configure_win32_api():
     user32.EnableWindow.restype = wintypes.BOOL
     user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
     user32.GetWindowTextLengthW.restype = ctypes.c_int
+    user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowTextW.restype = ctypes.c_int
     user32.MessageBoxW.argtypes = [wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.UINT]
     user32.MessageBoxW.restype = ctypes.c_int
     user32.PostQuitMessage.argtypes = [ctypes.c_int]
@@ -181,6 +188,9 @@ class IMileWin32App:
         self.wecom_button = None
         self.wecom_settings_button = None
         self.dc_export_button = None
+        self.dispatch_route_edit = None
+        self.dispatch_driver_edit = None
+        self.dispatch_button = None
         self.status = None
         self.log = None
         self.busy = False
@@ -213,7 +223,7 @@ class IMileWin32App:
             100,
             80,
             920,
-            730,
+            840,
             None,
             None,
             instance,
@@ -246,6 +256,12 @@ class IMileWin32App:
         )
         user32.SendMessageW(handle, WM_SETFONT, self.font, True)
         return handle
+
+    def _get_control_text(self, handle):
+        length = user32.GetWindowTextLengthW(handle)
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(handle, buffer, len(buffer))
+        return buffer.value.strip()
 
     def _wndproc(self, hwnd, msg, wparam, lparam):
         if msg == 1:  # WM_CREATE
@@ -311,22 +327,70 @@ class IMileWin32App:
                 62,
                 ID_REPORT,
             )
+            self._create_control(
+                "STATIC",
+                "Route Code（多个用逗号分隔）",
+                SS_LEFT,
+                36,
+                365,
+                250,
+                24,
+            )
+            self._create_control(
+                "STATIC",
+                "司机（完整姓名或 姓名 | ID）",
+                SS_LEFT,
+                306,
+                365,
+                320,
+                24,
+            )
+            self.dispatch_route_edit = self._create_control(
+                "EDIT",
+                "",
+                WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL,
+                36,
+                390,
+                250,
+                38,
+                ID_DISPATCH_ROUTE,
+            )
+            self.dispatch_driver_edit = self._create_control(
+                "EDIT",
+                "",
+                WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL,
+                306,
+                390,
+                320,
+                38,
+                ID_DISPATCH_DRIVER,
+            )
+            self.dispatch_button = self._create_control(
+                "BUTTON",
+                "⑤ 自动合并并选司机",
+                BS_PUSHBUTTON | WS_TABSTOP,
+                646,
+                378,
+                202,
+                52,
+                ID_AUTO_DISPATCH,
+            )
             self.status = self._create_control(
                 "STATIC",
                 "就绪 · 日常请先打开 iMile x WISEWAY 主群",
                 SS_LEFT,
                 36,
-                365,
+                458,
                 812,
                 28,
             )
-            self._create_control("STATIC", "运行记录", SS_LEFT, 36, 400, 120, 24)
+            self._create_control("STATIC", "运行记录", SS_LEFT, 36, 493, 120, 24)
             self.log = self._create_control(
                 "EDIT",
                 "",
                 WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
                 36,
-                430,
+                523,
                 812,
                 225,
             )
@@ -351,6 +415,42 @@ class IMileWin32App:
                 files = self._file_dialog(False, "选择中心运单查询 Excel", "Excel 文件\0*.xlsx\0所有文件\0*.*\0")
                 if files:
                     self._start("正在生成并发送报表…", run_report, files[0])
+            elif command_id == ID_AUTO_DISPATCH and not self.busy:
+                route_code = self._get_control_text(self.dispatch_route_edit)
+                driver_spec = self._get_control_text(self.dispatch_driver_edit)
+                if not route_code or not driver_spec:
+                    missing = []
+                    if not route_code:
+                        missing.append("Route Code")
+                    if not driver_spec:
+                        missing.append("司机")
+                    user32.MessageBoxW(
+                        self.hwnd,
+                        f"请先填写：{'、'.join(missing)}。",
+                        "无法自动分单",
+                        0x30,
+                    )
+                else:
+                    confirmation = (
+                        f"Route Code：{route_code}\n"
+                        f"司机：{driver_spec}\n\n"
+                        "程序只会选择你列出的线路，合并箱号并选中上述司机。\n"
+                        "最后的“确定”按钮由你在网页中手动点击。\n"
+                        "是否继续？"
+                    )
+                    result = user32.MessageBoxW(
+                        self.hwnd,
+                        confirmation,
+                        "确认自动分单",
+                        0x00000004 | 0x00000030 | 0x00000100,
+                    )
+                    if result == 6:
+                        self._start(
+                            f"正在自动合并并选择司机：{route_code}…",
+                            run_auto_dispatch,
+                            route_code,
+                            driver_spec,
+                        )
             return 0
         if msg == WM_APP_UPDATE:
             self._drain_events()
@@ -381,13 +481,24 @@ class IMileWin32App:
         folder = Path(parts[0])
         return [str(folder / name) for name in parts[1:]]
 
+    def _set_task_controls_enabled(self, enabled):
+        controls = (
+            self.wecom_button,
+            self.wecom_settings_button,
+            self.tracking_button,
+            self.dc_export_button,
+            self.report_button,
+            self.dispatch_route_edit,
+            self.dispatch_driver_edit,
+            self.dispatch_button,
+        )
+        for control in controls:
+            if control:
+                user32.EnableWindow(control, enabled)
+
     def _start(self, status, function, *args):
         self.busy = True
-        user32.EnableWindow(self.wecom_button, False)
-        user32.EnableWindow(self.wecom_settings_button, False)
-        user32.EnableWindow(self.tracking_button, False)
-        user32.EnableWindow(self.dc_export_button, False)
-        user32.EnableWindow(self.report_button, False)
+        self._set_task_controls_enabled(False)
         user32.SetWindowTextW(self.status, status)
         self._append_log("\r\n" + "=" * 64 + "\r\n")
         threading.Thread(target=self._worker, args=(function, args), daemon=True).start()
@@ -413,11 +524,7 @@ class IMileWin32App:
                 self._append_log(payload.replace("\n", "\r\n"))
             elif kind in {"success", "error"}:
                 self.busy = False
-                user32.EnableWindow(self.wecom_button, True)
-                user32.EnableWindow(self.wecom_settings_button, True)
-                user32.EnableWindow(self.tracking_button, True)
-                user32.EnableWindow(self.dc_export_button, True)
-                user32.EnableWindow(self.report_button, True)
+                self._set_task_controls_enabled(True)
                 prefix = "完成 · " if kind == "success" else "失败 · "
                 user32.SetWindowTextW(self.status, prefix + payload)
                 icon = 0x40 if kind == "success" else 0x10

@@ -248,9 +248,14 @@ def _browser_window_handles():
             title = win32gui.GetWindowText(handle).strip()
             score = 0
             normalized = title.lower()
-            if title.startswith("DC -"):
+            if title.startswith(("DC -", "DS -")):
                 score += 20
-            if "中心运单查询" in title or "central waybill query" in normalized:
+            if (
+                "中心运单查询" in title
+                or "central waybill query" in normalized
+                or "分箱预分配" in title
+                or "box planning" in normalized
+            ):
                 score += 20
             if "imile" in normalized or "dc" in normalized:
                 score += 5
@@ -283,7 +288,11 @@ def _find_dc_window():
         try:
             window = Desktop(backend="uia").window(handle=handle)
             url = _address_bar_url(window)
-            score = title_score + (50 if "dc.imile.com" in url.lower() else 0)
+            score = title_score + (
+                50
+                if re.search(r"https?://[^/]*\.imile\.com(?:/|$)", url.lower())
+                else 0
+            )
             if best is None or score > best[0]:
                 best = (score, window)
         except Exception:

@@ -5,8 +5,13 @@ cd /d "%~dp0"
 
 set "LOCAL_PYTHON=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
 set "BUNDLED_PYTHON=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+set "PROJECT_PYTHON=%~dp0.build_runtime\pytest-env\Scripts\python.exe"
 set "PYTHON_EXE="
-if exist "%LOCAL_PYTHON%" (
+if exist "%PROJECT_PYTHON%" (
+  "%PROJECT_PYTHON%" -c "import PyInstaller" >nul 2>nul
+  if not errorlevel 1 set "PYTHON_EXE=%PROJECT_PYTHON%"
+)
+if not defined PYTHON_EXE if exist "%LOCAL_PYTHON%" (
   "%LOCAL_PYTHON%" -c "import PyInstaller" >nul 2>nul
   if not errorlevel 1 set "PYTHON_EXE=%LOCAL_PYTHON%"
 )
@@ -24,6 +29,7 @@ for %%I in ("%PYTHON_EXE%") do set "PYTHON_HOME=%%~dpI"
   --hidden-import wecom_downloader ^
   --hidden-import lark_mail_downloader ^
   --hidden-import imile_dc_downloader ^
+  --hidden-import imile_dispatcher ^
   --hidden-import pywinauto ^
   --hidden-import pywinauto.controls.uiawrapper ^
   --hidden-import win32gui ^

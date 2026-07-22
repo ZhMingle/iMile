@@ -60,6 +60,7 @@ The redirect URL must be added in the Feishu Developer Console. The app also nee
 
 - 从 `input/` 的原始订单明细中提取查询单号
 - 自动把查询单号提交到内部系统并下载“中心运单查询”文件
+- 按明确列出的 Route Code 合并箱号，并为唯一箱号精确选中指定司机
 - 用“中心运单查询”文件更新 `当日数据统计.xlsx`
 - 生成供应商分单、非奥克兰总览和线路预测图片
 - 按飞书配置把图片发送到对应群
@@ -113,6 +114,33 @@ TEMU 文件从企业微信缓存或聊天记录下载到 `input/TEMU/日期/`，
 配置示例见 `wecom_download_config.example.json`。该功能使用屏幕 OCR，企业微信界面升级后
 可能需要重新适配；如果没有识别到单号，请确认完整的待处理消息在当前画面中可见。任何
 页面校验失败都会立即停止，不会继续点击或输入。
+
+### 自动分单（Windows）
+
+Windows 桌面助手支持按 Route Code 自动完成“查询、逐行选择、合并箱号、分配司机”。使用前请先
+在浏览器登录 iMile DC，然后在助手中输入：
+
+- 要处理的 Route Code 列表，用逗号分隔，例如 `404, 404 B, 404 S`
+- 司机的完整显示名，推荐填写 `姓名 | 司机ID`，例如 `Yang Jun-feng | D21023280101`
+
+程序只会勾选输入框中明确列出的 Route Code，不会自行扩展同一基础码的其它字母后缀。例如输入
+`404, 404 B, 404 S` 时，即使搜索结果包含 `404 A` 也不会勾选；输入
+`501, 501 A, 501 D` 时不会勾选 `501 C`。同一基础线路会用基础码查询；像
+`309, 310, 311, 312` 这样的不同线路组合会用安全的共同前缀 `3` 查询，再只勾选明确列出的代码。程序
+始终逐行精确核对，不使用表头的“全选”复选框，也不会误选 `4040` 或 `1404`。
+
+选择完成后，程序点击“合并箱号”并等待页面状态稳定，再从刷新后的结果中重新读取箱号。只有
+结果收敛为一个唯一箱号时才会继续打开“分配”；不会沿用合并前缓存的箱号。司机下拉项必须与
+输入的完整显示名精确匹配。如果只输入姓名而出现同名结果、没有唯一箱号、页面未按预期刷新，
+或任何控件状态无法确认，程序会立即停止，不会猜测选项。司机选好后程序停留在分配弹窗，最终
+“确定”必须由操作人核对箱号和司机后手动点击。
+
+程序默认直接打开 DS 的“分箱预分配”页面；若页面路径变化，也可以在
+`wecom_download_config.json` 中修改 `dc_dispatch_url`，或使用左侧搜索入口。相关超时配置如下：
+
+- `dc_dispatch_page_timeout_seconds`：等待“分箱预分配”页面可操作，默认 60 秒
+- `dc_dispatch_action_timeout_seconds`：等待查询、弹窗、司机选项及分配结果，默认 20 秒
+- `dc_dispatch_merge_timeout_seconds`：等待合并结果收敛为唯一箱号，默认 60 秒
 
 ### 目录结构
 
@@ -457,9 +485,41 @@ This project automates the daily iMile inbound parcel reporting and Lark distrib
 Previously, the process required manually copying tracking numbers, querying the internal system, updating the workbook, taking screenshots, and pasting images into different Lark groups. This project automates the repetitive reporting and sending steps:
 
 - Extract query numbers from raw order detail files in `input/`
+- Merge boxes for explicitly listed Route Codes and select the exact driver for the unique resulting box
 - Update `当日数据统计.xlsx` using the internal-system center waybill query export
 - Generate supplier dispatch, non-Auckland overview, and route forecast images
 - Send images to configured Lark groups
+
+### Automatic Dispatch (Windows)
+
+The Windows desktop assistant can automate the Route Code workflow: query, select each matching row,
+merge box numbers, and assign the result to a driver. Sign in to iMile DC in the browser first, then enter:
+
+- The exact Route Codes to process, comma-separated, for example `404, 404 B, 404 S`
+- The driver's full display name, preferably `Name | Driver ID`, for example
+  `Yang Jun-feng | D21023280101`
+
+The assistant checks only Route Codes explicitly listed in the input; it never guesses other letter suffixes.
+For `404, 404 B, 404 S`, a `404 A` search result is left unchecked. For `501, 501 A, 501 D`, a
+`501 C` result is left unchecked. Codes from one family use their shared base query. A mixed list such as
+`309, 310, 311, 312` uses the safe common prefix `3` and then checks only those exact codes. Rows are
+always compared exactly and checked individually; the table header's select-all checkbox is not used, and
+values such as `4040` or `1404` are not selected.
+
+After selection, the assistant invokes **Merge box numbers**, waits for the page state to settle, and reads
+the box number again from the refreshed results. It opens **Assign** only when the result has converged to
+one unique box number; it never reuses a box number cached before the merge. The driver option must exactly
+match the supplied full display name. If a partial name is ambiguous, the merged result is not unique, the
+page does not refresh as expected, or any control state cannot be verified, the assistant stops immediately
+without guessing. After selecting the driver, it leaves the assignment dialog open. The operator must verify
+the box and driver and click the final **Confirm** button manually.
+
+The assistant opens the DS **Box Pre-allocation** page directly by default. If that route changes, update
+`dc_dispatch_url` in `wecom_download_config.json` or use the left-side search. Dispatch timeout settings are:
+
+- `dc_dispatch_page_timeout_seconds`: wait for the Box Pre-allocation page to become usable; default 60 seconds
+- `dc_dispatch_action_timeout_seconds`: wait for queries, dialogs, driver options, and assignment results; default 20 seconds
+- `dc_dispatch_merge_timeout_seconds`: wait for the merge result to converge to one box number; default 60 seconds
 
 ### Project Structure
 
