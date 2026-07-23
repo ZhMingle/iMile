@@ -246,8 +246,13 @@ def _browser_window_handles():
             if win32gui.GetClassName(handle) != "Chrome_WidgetWin_1":
                 return
             title = win32gui.GetWindowText(handle).strip()
-            score = 0
-            normalized = title.lower()
+            normalized = title.lower().replace("\u200b", "")
+            if not any(
+                marker in normalized
+                for marker in ("microsoft edge", "google chrome")
+            ):
+                return
+            score = 1
             if title.startswith(("DC -", "DS -")):
                 score += 20
             if (
@@ -297,7 +302,7 @@ def _find_dc_window():
                 best = (score, window)
         except Exception:
             continue
-    if best is None or best[0] < 5:
+    if best is None or best[0] < 1:
         return None
     return best[1]
 

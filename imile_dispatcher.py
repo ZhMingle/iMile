@@ -92,7 +92,7 @@ def selected_route_rows(rows, route_codes):
 
 
 def _parse_route_codes(route_spec):
-    raw_codes = re.split(r"[,，;；\r\n]+", str(route_spec or ""))
+    raw_codes = re.split(r"[,，]+", str(route_spec or ""))
     route_codes = tuple(
         dict.fromkeys(normalize_route_code(value) for value in raw_codes if normalize_route_code(value))
     )
@@ -122,6 +122,89 @@ def parse_dispatch_rule(route_spec, driver_spec):
     return DispatchRule(route_base, _collapse_spaces(parts[0]), driver_id, route_codes)
 
 
+def _split_dispatch_groups(value):
+    return tuple(
+        group.strip()
+        for group in re.split(r"[;；\r\n]+", str(value or ""))
+        if group.strip()
+    )
+
+
+def parse_dispatch_batch(route_spec, driver_spec):
+    route_groups = _split_dispatch_groups(route_spec)
+    driver_groups = _split_dispatch_groups(driver_spec)
+    if not route_groups:
+        raise ValueError("Route Code 不能为空。")
+    if not driver_groups:
+        raise ValueError("司机姓名不能为空。")
+    if len(route_groups) != len(driver_groups):
+        raise ValueError(
+            f"线路共 {len(route_groups)} 组，司机共 {len(driver_groups)} 组；"
+            "请用分号分组并确保一一对应。"
+        )
+
+    rules = []
+    for index, (route_group, driver_group) in enumerate(
+        zip(route_groups, driver_groups),
+        start=1,
+    ):
+        try:
+            rules.append(parse_dispatch_rule(route_group, driver_group))
+        except ValueError as exc:
+            raise ValueError(f"第 {index} 组输入无效：{exc}") from exc
+    return tuple(rules)
+
+
+def _manifest_route_code(token):
+    match = re.fullmatch(r"([0-9]{3,})([A-Za-z]?)", str(token or "").strip())
+    if match is None:
+        return None
+    number, suffix = match.groups()
+    return number + (f" {suffix.upper()}" if suffix else "")
+
+
+def parse_dispatch_manifest(manifest):
+    lines = [
+        (line_number, line.strip())
+        for line_number, line in enumerate(str(manifest or "").splitlines(), start=1)
+        if line.strip()
+    ]
+    if not lines:
+        raise ValueError("分单清单不能为空。")
+
+    rules = []
+    for line_number, line in lines:
+        parts = line.split()
+        route_codes = []
+        split_at = 0
+        for split_at, token in enumerate(parts):
+            route_code = _manifest_route_code(token)
+            if route_code is None:
+                break
+            route_codes.append(route_code)
+        else:
+            split_at = len(parts)
+
+        driver_parts = parts[split_at:]
+        if not route_codes:
+            raise ValueError(f"第 {line_number} 行开头没有有效线路：{line}")
+        if not driver_parts:
+            raise ValueError(f"第 {line_number} 行缺少司机：{line}")
+        if len(driver_parts) > 1 and re.fullmatch(r"[A-Za-z]", driver_parts[0]):
+            raise ValueError(
+                f"第 {line_number} 行的字母线路后缀请紧贴数字填写，"
+                "例如写 404B；程序会自动转换为 404 B。"
+            )
+
+        try:
+            rules.append(
+                parse_dispatch_rule(",".join(route_codes), " ".join(driver_parts))
+            )
+        except ValueError as exc:
+            raise ValueError(f"第 {line_number} 行输入无效：{exc}") from exc
+    return tuple(rules)
+
+
 def parse_driver_option(text):
     raw_text = _collapse_spaces(text)
     if "|" not in raw_text:
@@ -140,18 +223,24 @@ def resolve_driver(options, rule):
         key = (_normalize_person(option.name), option.driver_id.casefold())
         unique.setdefault(key, option)
 
+    candidates = list(unique.values())
+    if rule.driver_id is None:
+        if candidates:
+            return candidates[0]
+        raise RuntimeError(f"搜索司机 {rule.driver_name} 后没有可选结果。")
+
     matches = [
         option
-        for option in unique.values()
+        for option in candidates
         if _normalize_person(option.name) == _normalize_person(rule.driver_name)
-        and (rule.driver_id is None or option.driver_id.casefold() == rule.driver_id.casefold())
+        and option.driver_id.casefold() == rule.driver_id.casefold()
     ]
     if not matches:
-        suffix = f" | {rule.driver_id}" if rule.driver_id else ""
-        raise RuntimeError(f"没有找到精确司机：{rule.driver_name}{suffix}")
-    if len(matches) > 1:
-        choices = "、".join(option.raw_text for option in matches[:5])
-        raise RuntimeError(f"司机姓名不唯一，请输入“姓名 | 司机ID”：{choices}")
+        choices = "、".join(option.raw_text for option in candidates)
+        detail = f"；当前候选：{choices}" if choices else ""
+        raise RuntimeError(
+            f"没有找到精确司机：{rule.driver_name} | {rule.driver_id}{detail}"
+        )
     return matches[0]
 
 
@@ -400,7 +489,7 @@ def _set_edit_text(control, value, field_name, guard=None, refetch=None):
             value,
             pause=0.03,
             with_spaces=True,
-            set_foreground=False,
+            set_foreground=True,
         )
     except Exception as exc:
         raise RuntimeError(f"无法向{field_name}输入框键入内容，已停止操作：{exc}") from exc
@@ -481,8 +570,6 @@ def _activate_pending_tab(window, timeout=25):
     deadline = time.monotonic() + timeout
     target = None
     while time.monotonic() < deadline:
-        if _active_dispatch_page(window) and _pending_table_visible(window):
-            return
         actions = [
             control
             for control in _visible_controls(window)
@@ -491,6 +578,12 @@ def _activate_pending_tab(window, timeout=25):
         ]
         if actions:
             target = min(actions, key=lambda item: _center(dc._rectangle(item))[1])
+            try:
+                selected = bool(target.iface_selection_item.CurrentIsSelected)
+            except Exception:
+                selected = None
+            if selected is not False and _pending_table_visible(window):
+                return
             break
         time.sleep(0.4)
     if target is None:
@@ -503,7 +596,20 @@ def _activate_pending_tab(window, timeout=25):
         except Exception:
             dc._activate_control(target)
     while time.monotonic() < deadline:
-        if _find_route_edit(window) is not None and _pending_table_visible(window):
+        actions = [
+            control
+            for control in _visible_controls(window)
+            if dc._control_type(control) == "TabItem"
+            and dc._text_key(dc._control_name(control)) in PENDING_ASSIGN_KEYS
+        ]
+        if actions and _find_route_edit(window) is not None and _pending_table_visible(window):
+            current = min(actions, key=lambda item: _center(dc._rectangle(item))[1])
+            try:
+                if not bool(current.iface_selection_item.CurrentIsSelected):
+                    time.sleep(0.4)
+                    continue
+            except Exception:
+                pass
             return
         time.sleep(0.4)
     raise RuntimeError("点击“待分配”后页面没有就绪，已停止自动分单。")
@@ -541,47 +647,44 @@ def _ensure_dispatch_page(config):
     if dc.sys.platform != "win32":
         raise RuntimeError("自动分单只能在 Windows 电脑上运行。")
     timeout = max(20, int(config.get("dc_dispatch_page_timeout_seconds", 60)))
-    window = dc._find_dc_window()
-    if window is not None:
+    from pywinauto import Desktop
+
+    windows = []
+    for _score, handle, _title in dc._browser_window_handles():
+        try:
+            windows.append(Desktop(backend="uia").window(handle=handle))
+        except Exception:
+            continue
+
+    for window in windows:
         dc._prepare_window(window)
         if _active_dispatch_page(window):
-            _activate_pending_tab(window)
+            _activate_pending_tab(window, timeout=min(timeout, 25))
             return window
-        if _activate_existing_dispatch_browser_tab(window, timeout):
-            _activate_pending_tab(window)
-            return window
-        if dc._portal_shell_visible(window) and _open_dispatch_from_search(window, timeout):
-            _activate_pending_tab(window)
+
+    per_window_timeout = max(3, min(8, timeout // max(1, len(windows))))
+    for window in windows:
+        dc._prepare_window(window)
+        if _activate_existing_dispatch_browser_tab(window, per_window_timeout):
+            _activate_pending_tab(window, timeout=min(timeout, 25))
             return window
 
     configured_url = str(config.get("dc_dispatch_url") or DEFAULT_DISPATCH_URL).strip()
-    print("正在打开 iMile DC，并进入“分箱预分配”。")
+    print("没有找到现有分箱预分配标签页，正在新开一个页面。")
     webbrowser.open(configured_url, new=2)
     deadline = time.monotonic() + timeout
-    last_window = None
     while time.monotonic() < deadline:
         candidate = dc._find_dc_window()
         if candidate is None:
             time.sleep(0.8)
             continue
-        last_window = candidate
         dc._prepare_window(candidate)
         if _active_dispatch_page(candidate):
-            _activate_pending_tab(candidate)
-            return candidate
-        if _activate_existing_dispatch_browser_tab(candidate, timeout):
-            _activate_pending_tab(candidate)
-            return candidate
-        if dc._login_page_visible(candidate):
-            raise RuntimeError("iMile DC 尚未登录。请登录后重试自动分单。")
-        if dc._portal_shell_visible(candidate) and _open_dispatch_from_search(candidate, timeout):
-            _activate_pending_tab(candidate)
+            _activate_pending_tab(candidate, timeout=min(timeout, 25))
             return candidate
         time.sleep(0.8)
-    if last_window is not None and dc._login_page_visible(last_window):
-        raise RuntimeError("iMile DC 尚未登录。请登录后重试自动分单。")
     raise RuntimeError(
-        "没有进入“分箱预分配”的“待分配”页面。请先在 DC 系统打开该页面后重试。"
+        "没有找到或打开“分箱预分配”的“待分配”页面。请确认 Edge 已登录 DC 后重试。"
     )
 
 
@@ -591,14 +694,29 @@ class UIADispatchPage:
         self.route_base = route_base
         self.config = config
         self.action_timeout = max(8, int(config.get("dc_dispatch_action_timeout_seconds", 20)))
+        self.query_timeout = max(
+            self.action_timeout,
+            int(config.get("dc_dispatch_query_timeout_seconds", 45)),
+        )
         self._rows = {}
         self._driver_controls = {}
+        self._assign_dialog_confirmed = False
 
     def _require_active_dispatch(self):
-        if not _dispatch_url_active(self.window):
-            raise RuntimeError(
-                "当前 Edge 已离开“分箱预分配”页面；为避免误点其他业务页面，已停止自动分单。"
-            )
+        if _dispatch_url_active(self.window):
+            return
+        if _activate_existing_dispatch_browser_tab(self.window, timeout=5):
+            return
+        refreshed = dc._find_dc_window()
+        if refreshed is not None:
+            self.window = refreshed
+            if _dispatch_url_active(self.window):
+                return
+            if _activate_existing_dispatch_browser_tab(self.window, timeout=5):
+                return
+        raise RuntimeError(
+            "当前 Edge 已离开“分箱预分配”页面；为避免误点其他业务页面，已停止自动分单。"
+        )
 
     def _headers(self):
         controls = _visible_controls(self.window)
@@ -912,7 +1030,10 @@ class UIADispatchPage:
             dialogs = [
                 control
                 for control in controls
-                if "dialog" in dc._control_class(control).casefold()
+                if (
+                    "dialog" in dc._control_class(control).casefold()
+                    or dc._control_type(control) == "Window"
+                )
                 and dc._rectangle(control) is not None
             ]
             for dialog in dialogs:
@@ -993,7 +1114,10 @@ class UIADispatchPage:
         candidates = [
             control
             for control in _visible_controls(self.window)
-            if "dialog" in dc._control_class(control).casefold()
+            if (
+                "dialog" in dc._control_class(control).casefold()
+                or dc._control_type(control) == "Window"
+            )
             and dc._rectangle(control) is not None
         ]
         return sorted(candidates, key=lambda item: _rect_area(dc._rectangle(item)), reverse=True)
@@ -1003,6 +1127,7 @@ class UIADispatchPage:
         controls = _visible_controls(self.window)
         for dialog in self._dialogs():
             dialog_rect = dc._rectangle(dialog)
+            title_key = dc._text_key(dc._control_name(dialog))
             names = [
                 dc._control_name(control)
                 for control in controls
@@ -1012,6 +1137,8 @@ class UIADispatchPage:
             text_key = dc._text_key(" ".join(names))
             if any(key in text_key for key in SUPPLIER_KEYS):
                 continue
+            if self._assign_dialog_confirmed and title_key in ASSIGN_KEYS:
+                return dialog
             has_assign = any(key in text_key for key in ASSIGN_KEYS)
             has_driver = any(key in text_key for key in DRIVER_LABEL_KEYS)
             has_box = not expected_box or expected_box.casefold() in " ".join(names).casefold()
@@ -1021,6 +1148,7 @@ class UIADispatchPage:
 
     def open_assign(self, box_code):
         self._require_active_dispatch()
+        self._assign_dialog_confirmed = False
         self.read_route_rows()
         rows = [row for row in self._rows.values() if row.value.box_code == box_code]
         if not rows:
@@ -1032,9 +1160,10 @@ class UIADispatchPage:
         self._assign_box_code = box_code
         self._require_active_dispatch()
         dc._activate_control(target)
-        deadline = time.monotonic() + self.action_timeout
+        deadline = time.monotonic() + self.query_timeout
         while time.monotonic() < deadline:
             if self._assign_dialog(box_code) is not None:
+                self._assign_dialog_confirmed = True
                 return
             time.sleep(0.25)
         raise RuntimeError("点击后没有识别到包含目标箱号和“分配司机”的分配窗口。")
@@ -1082,6 +1211,31 @@ class UIADispatchPage:
         ]
         return min(text_edits or candidates, key=lambda item: item[0])[1]
 
+    def _driver_popup(self):
+        candidates = [
+            control
+            for control in _visible_controls(self.window)
+            if dc._control_type(control) == "List"
+            and "pro-select-content" in dc._control_class(control)
+            and dc._rectangle(control) is not None
+        ]
+        return max(candidates, key=lambda item: _rect_area(dc._rectangle(item))) if candidates else None
+
+    def _driver_search_edit(self):
+        popup = self._driver_popup()
+        if popup is None:
+            return None
+        popup_rect = dc._rectangle(popup)
+        candidates = [
+            control
+            for control in _visible_controls(self.window)
+            if dc._control_type(control) == "Edit"
+            and dc._text_key(dc._control_name(control)) in {"搜索", "search"}
+            and dc._rectangle(control) is not None
+            and _contains(popup_rect, *_center(dc._rectangle(control)))
+        ]
+        return min(candidates, key=lambda item: dc._rectangle(item).top) if candidates else None
+
     def search_drivers(self, query):
         self._require_active_dispatch()
         edit = self._driver_edit()
@@ -1091,9 +1245,15 @@ class UIADispatchPage:
             edit.click_input()
         except Exception:
             dc._click_control(edit)
-        refreshed = self._driver_edit()
-        if refreshed is not None:
-            edit = refreshed
+        search_deadline = time.monotonic() + min(10, self.action_timeout)
+        while time.monotonic() < search_deadline:
+            search_edit = self._driver_search_edit()
+            if search_edit is not None:
+                edit = search_edit
+                break
+            time.sleep(0.15)
+        if dc._control_type(edit) != "Edit":
+            raise RuntimeError("展开司机下拉框后没有找到“搜索”输入框。")
         self._require_active_dispatch()
         _set_edit_text(
             edit,
@@ -1102,18 +1262,34 @@ class UIADispatchPage:
             self._require_active_dispatch,
             self._driver_edit,
         )
-        deadline = time.monotonic() + self.action_timeout
+        deadline = time.monotonic() + self.query_timeout
+        started_at = time.monotonic()
+        last_signature = None
+        stable_count = 0
         while time.monotonic() < deadline:
-            if self.read_driver_options():
+            options = self.read_driver_options()
+            if any(
+                _normalize_person(option.name) == _normalize_person(query)
+                for option in options
+            ):
+                return
+            signature = tuple(option.raw_text for option in options)
+            if signature and signature == last_signature:
+                stable_count += 1
+            else:
+                last_signature = signature
+                stable_count = 1 if signature else 0
+            if stable_count >= 3 and time.monotonic() - started_at >= 1.2:
                 return
             time.sleep(0.3)
         raise RuntimeError(f"搜索司机 {query} 后没有出现带司机 ID 的选项。")
 
     def read_driver_options(self):
         dialog, _ = self._dialog_controls()
-        if dialog is None:
+        popup = self._driver_popup()
+        if dialog is None and popup is None:
             return []
-        dialog_rect = dc._rectangle(dialog)
+        scope_rect = dc._rectangle(popup or dialog)
         controls = _visible_controls(self.window)
         options = []
         self._driver_controls = {}
@@ -1124,7 +1300,7 @@ class UIADispatchPage:
             if rect is None:
                 continue
             x, y = _center(rect)
-            if x < dialog_rect.left - 20 or x > dialog_rect.right + 20 or y < dialog_rect.top:
+            if not _contains(scope_rect, x, y):
                 continue
             if raw:
                 option_controls.append((control, rect, raw))
@@ -1209,9 +1385,44 @@ class UIADispatchPage:
             time.sleep(0.2)
         raise RuntimeError(f"点击后未能确认司机已选中：{option.raw_text}")
 
+    def assignment_dialog_visible(self, box_code):
+        self._require_active_dispatch()
+        return self._assign_dialog(box_code) is not None
 
-def dispatch_route(route_code, driver_spec, config=None):
-    rule = parse_dispatch_rule(route_code, driver_spec)
+
+def wait_for_manual_confirmation(
+    rule,
+    page,
+    result,
+    timeout=900,
+    verify_timeout=60,
+    poll_interval=0.5,
+):
+    deadline = time.monotonic() + max(0, float(timeout))
+    while page.assignment_dialog_visible(result.merged_box_code):
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"等待人工确认超时：{', '.join(result.matched_routes)} / "
+                f"{result.merged_box_code}。队列已停止，程序没有点击“确定”。"
+            )
+        time.sleep(max(0, float(poll_interval)))
+
+    verify_deadline = time.monotonic() + max(0, float(verify_timeout))
+    route_codes = _rule_route_codes(rule)
+    while True:
+        page.search_routes(rule.route_base)
+        rows = selected_route_rows(page.read_route_rows(), route_codes)
+        if all(row.box_code != result.merged_box_code for row in rows):
+            return
+        if time.monotonic() >= verify_deadline:
+            raise RuntimeError(
+                f"箱号 {result.merged_box_code} 仍在“待分配”中。"
+                "可能点击了“取消”或分配未成功，队列已停止。"
+            )
+        time.sleep(max(0, float(poll_interval)))
+
+
+def _dispatch_single_rule(rule, config=None):
     config = dc._load_config(config)
     requested_routes = ", ".join(rule.route_codes)
     print(f"[1/6] 正在进入“分箱预分配 / 待分配”：{requested_routes}")
@@ -1226,13 +1437,83 @@ def dispatch_route(route_code, driver_spec, config=None):
     )
     print(f"[3/6] 精确匹配线路：{', '.join(result.matched_routes)}")
     print(f"[4/6] 唯一合并箱号：{result.merged_box_code}")
-    print(f"[5/6] 已精确选择司机：{result.driver.raw_text}")
+    print(f"[5/6] 已选择司机：{result.driver.raw_text}")
     print("[6/6] 已停在分配窗口；请人工核对后点击“确定”。")
     return (
         f"{', '.join(result.matched_routes)}：{len(result.old_box_codes)} 个箱号合并为 "
         f"{result.merged_box_code}，已选中 {result.driver.raw_text}。"
         "请回到网页核对箱号和司机，再手动点击“确定”。"
     )
+
+
+def _dispatch_rules(rules, config=None):
+    if len(rules) == 1:
+        return _dispatch_single_rule(rules[0], config=config)
+
+    config = dc._load_config(config)
+    total = len(rules)
+    merge_timeout = max(5, int(config.get("dc_dispatch_merge_timeout_seconds", 60)))
+    confirm_timeout = max(
+        60,
+        int(config.get("dc_dispatch_manual_confirm_timeout_seconds", 900)),
+    )
+    print(f"[准备] 已校验 {total} 组线路与司机，正在进入“分箱预分配 / 待分配”。")
+    window = _ensure_dispatch_page(config)
+    page = UIADispatchPage(window, rules[0].route_base, config)
+    verify_timeout = max(page.query_timeout, 60)
+    results = []
+
+    for index, rule in enumerate(rules, start=1):
+        requested_routes = ", ".join(rule.route_codes)
+        print(f"[{index}/{total}] 正在处理线路：{requested_routes}")
+        result = dispatch_one(rule, page, timeout=merge_timeout)
+        print(
+            f"[{index}/{total}] 已选中 {result.driver.raw_text}；"
+            f"箱号 {result.merged_box_code}。"
+        )
+        print(
+            f"[{index}/{total}] 请在网页核对后手动点击“确定”；"
+            "成功后程序会自动继续下一组。"
+        )
+        wait_for_manual_confirmation(
+            rule,
+            page,
+            result,
+            timeout=confirm_timeout,
+            verify_timeout=verify_timeout,
+        )
+        results.append(result)
+        print(f"[{index}/{total}] 已确认从“待分配”移除。")
+
+    return (
+        f"批量分单完成：{len(results)} 组均已由你人工确认，"
+        "且已验证目标箱号离开“待分配”。"
+    )
+
+
+def dispatch_route(route_code, driver_spec, config=None):
+    return _dispatch_single_rule(
+        parse_dispatch_rule(route_code, driver_spec),
+        config=config,
+    )
+
+
+def dispatch_batch(route_spec, driver_spec, config=None):
+    return _dispatch_rules(
+        parse_dispatch_batch(route_spec, driver_spec),
+        config=config,
+    )
+
+
+def dispatch_manifest(manifest, config=None):
+    rules = parse_dispatch_manifest(manifest)
+    print(f"[清单] 已识别 {len(rules)} 组分单任务：")
+    for index, rule in enumerate(rules, start=1):
+        print(
+            f"  {index}. {', '.join(rule.route_codes)} → {rule.driver_name}"
+            + (f" | {rule.driver_id}" if rule.driver_id else "")
+        )
+    return _dispatch_rules(rules, config=config)
 
 
 if __name__ == "__main__":

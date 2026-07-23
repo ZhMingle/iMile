@@ -60,7 +60,12 @@ def run_dc_export():
 
 def run_auto_dispatch(route_code, driver_spec):
     module = importlib.import_module("imile_dispatcher")
-    return module.dispatch_route(route_code, driver_spec)
+    return module.dispatch_batch(route_code, driver_spec)
+
+
+def run_auto_dispatch_manifest(manifest):
+    module = importlib.import_module("imile_dispatcher")
+    return module.dispatch_manifest(manifest)
 
 
 def open_wecom_config():

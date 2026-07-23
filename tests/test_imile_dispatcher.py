@@ -55,6 +55,30 @@ class FakeDispatchPage:
         return self.verify_result
 
 
+class ManualConfirmationPage:
+    def __init__(self, dialog_states, route_snapshots):
+        self._dialog_states = list(dialog_states)
+        self._route_snapshots = [list(rows) for rows in route_snapshots]
+        self.route_searches = []
+
+    def assignment_dialog_visible(self, _box_code):
+        if not self._dialog_states:
+            return False
+        if len(self._dialog_states) == 1:
+            return self._dialog_states[0]
+        return self._dialog_states.pop(0)
+
+    def search_routes(self, base):
+        self.route_searches.append(base)
+
+    def read_route_rows(self):
+        if not self._route_snapshots:
+            return []
+        if len(self._route_snapshots) == 1:
+            return list(self._route_snapshots[0])
+        return list(self._route_snapshots.pop(0))
+
+
 def box_row(row_key, route_code, box_code, waybill_count=None):
     return dispatcher.BoxRow(
         row_key=row_key,
@@ -141,6 +165,73 @@ class DriverResolutionTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     dispatcher.parse_dispatch_rule(route_spec, "马德华1")
 
+    def test_parse_dispatch_batch_pairs_semicolon_groups(self):
+        rules = dispatcher.parse_dispatch_batch(
+            "201;302,303;401;406;604;606;605;404,404 B,404 S;202,301",
+            "Yang Jun;宋修丞;冯卫周3;冯卫周2;吴良梅;吴良梅2;冯卫周;戴女士;Travis",
+        )
+
+        self.assertEqual(len(rules), 9)
+        self.assertEqual(rules[0].route_codes, ("201",))
+        self.assertEqual(rules[0].driver_name, "Yang Jun")
+        self.assertEqual(rules[1].route_codes, ("302", "303"))
+        self.assertEqual(rules[7].route_codes, ("404", "404 B", "404 S"))
+        self.assertEqual(rules[8].route_codes, ("202", "301"))
+        self.assertEqual(rules[8].driver_name, "Travis")
+
+    def test_parse_dispatch_batch_accepts_chinese_semicolon_and_newline(self):
+        rules = dispatcher.parse_dispatch_batch(
+            "201；302,303\n401",
+            "Yang Jun；宋修丞\n冯卫周3",
+        )
+
+        self.assertEqual(
+            [rule.route_codes for rule in rules],
+            [("201",), ("302", "303"), ("401",)],
+        )
+
+    def test_parse_dispatch_batch_requires_matching_group_counts(self):
+        with self.assertRaisesRegex(ValueError, "线路共 2 组，司机共 1 组"):
+            dispatcher.parse_dispatch_batch("201;302", "Yang Jun")
+
+    def test_parse_dispatch_manifest_accepts_user_paste_and_normalizes_suffixes(self):
+        rules = dispatcher.parse_dispatch_manifest(
+            """201 Yang Jun
+302 303 宋修丞
+401 冯卫周3
+406 冯卫周2
+604 吴良梅
+606 吴良梅2
+605 冯卫周
+404 404B 404S 戴女士
+202 301 Travis"""
+        )
+
+        self.assertEqual(len(rules), 9)
+        self.assertEqual(rules[0].route_codes, ("201",))
+        self.assertEqual(rules[0].driver_name, "Yang Jun")
+        self.assertEqual(rules[1].route_codes, ("302", "303"))
+        self.assertEqual(rules[7].route_codes, ("404", "404 B", "404 S"))
+        self.assertEqual(rules[7].driver_name, "戴女士")
+        self.assertEqual(rules[8].route_codes, ("202", "301"))
+        self.assertEqual(rules[8].driver_name, "Travis")
+
+    def test_parse_dispatch_manifest_accepts_name_and_driver_id(self):
+        rules = dispatcher.parse_dispatch_manifest(
+            "301 Yang Jun-feng | D21023280101"
+        )
+
+        self.assertEqual(rules[0].driver_name, "Yang Jun-feng")
+        self.assertEqual(rules[0].driver_id, "D21023280101")
+
+    def test_parse_dispatch_manifest_rejects_spaced_route_suffix(self):
+        with self.assertRaisesRegex(ValueError, "字母线路后缀请紧贴数字"):
+            dispatcher.parse_dispatch_manifest("404 404 B 戴女士")
+
+    def test_parse_dispatch_manifest_requires_driver_on_every_line(self):
+        with self.assertRaisesRegex(ValueError, "第 2 行缺少司机"):
+            dispatcher.parse_dispatch_manifest("201 Yang Jun\n302 303")
+
     def test_parse_driver_option_splits_name_and_id(self):
         option = dispatcher.parse_driver_option(
             "  Yang Jun-feng   |   D21023280101  "
@@ -149,35 +240,36 @@ class DriverResolutionTests(unittest.TestCase):
         self.assertEqual(option.name, "Yang Jun-feng")
         self.assertEqual(option.driver_id, "D21023280101")
 
-    def test_exact_driver_name_does_not_choose_similar_search_result(self):
-        expected = driver_option("Yang Jun-feng", "D21023280101")
-        similar = driver_option("yang jun2-feng", "D21024948601")
-        rule = dispatcher.DispatchRule("301", "yang jun-feng")
+    def test_name_only_chooses_first_displayed_search_result(self):
+        first = driver_option("Travis North", "D21024948601")
+        second = driver_option("Travis", "D21023280101")
+        rule = dispatcher.DispatchRule("301", "Travis")
 
-        resolved = dispatcher.resolve_driver([similar, expected], rule)
+        resolved = dispatcher.resolve_driver([first, second], rule)
 
-        self.assertEqual(resolved.driver_id, "D21023280101")
+        self.assertEqual(resolved.driver_id, "D21024948601")
 
-    def test_partial_driver_name_is_not_silently_resolved(self):
+    def test_name_only_chooses_first_result_even_for_partial_match(self):
         options = [
             driver_option("Yang Jun-feng", "D21023280101"),
             driver_option("yang jun2-feng", "D21024948601"),
         ]
         rule = dispatcher.DispatchRule("301", "yang jun")
 
-        with self.assertRaises(RuntimeError):
-            dispatcher.resolve_driver(options, rule)
+        resolved = dispatcher.resolve_driver(options, rule)
 
-    def test_duplicate_exact_names_require_driver_id(self):
+        self.assertEqual(resolved.driver_id, "D21023280101")
+
+    def test_driver_id_still_requires_exact_name_and_id(self):
         options = [
             driver_option("Yang Jun-feng", "D21023280101"),
             driver_option("Yang Jun-feng", "D99999999999"),
         ]
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "没有找到精确司机"):
             dispatcher.resolve_driver(
                 options,
-                dispatcher.DispatchRule("301", "Yang Jun-feng"),
+                dispatcher.DispatchRule("301", "Yang Jun-feng", "D00000000000"),
             )
 
         resolved = dispatcher.resolve_driver(
@@ -334,6 +426,70 @@ class DispatchWorkflowTests(unittest.TestCase):
         self.assertEqual(page.selected_row_keys, [["base", "a", "d"]])
         self.assertEqual(page.opened_box_codes, ["M501"])
         self.assertEqual(page.confirm_count, 0)
+
+    def test_manual_confirmation_continues_after_box_leaves_pending(self):
+        result = dispatcher.DispatchResult(
+            route_base="301",
+            matched_routes=("301",),
+            old_box_codes=("B1",),
+            merged_box_code="M900",
+            driver=self.driver,
+        )
+        page = ManualConfirmationPage([True, False], [[]])
+
+        dispatcher.wait_for_manual_confirmation(
+            self.rule,
+            page,
+            result,
+            timeout=0.1,
+            verify_timeout=0.1,
+            poll_interval=0,
+        )
+
+        self.assertEqual(page.route_searches, ["301"])
+
+    def test_manual_confirmation_stops_if_box_remains_pending(self):
+        result = dispatcher.DispatchResult(
+            route_base="301",
+            matched_routes=("301",),
+            old_box_codes=("B1",),
+            merged_box_code="M900",
+            driver=self.driver,
+        )
+        page = ManualConfirmationPage(
+            [False],
+            [[box_row("still-pending", "301", "M900", 1)]],
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "可能点击了“取消”"):
+            dispatcher.wait_for_manual_confirmation(
+                self.rule,
+                page,
+                result,
+                timeout=0.1,
+                verify_timeout=0,
+                poll_interval=0,
+            )
+
+    def test_manual_confirmation_timeout_never_clicks_confirm(self):
+        result = dispatcher.DispatchResult(
+            route_base="301",
+            matched_routes=("301",),
+            old_box_codes=("B1",),
+            merged_box_code="M900",
+            driver=self.driver,
+        )
+        page = ManualConfirmationPage([True], [[]])
+
+        with self.assertRaisesRegex(RuntimeError, "程序没有点击“确定”"):
+            dispatcher.wait_for_manual_confirmation(
+                self.rule,
+                page,
+                result,
+                timeout=0,
+                verify_timeout=0,
+                poll_interval=0,
+            )
 
 
 if __name__ == "__main__":

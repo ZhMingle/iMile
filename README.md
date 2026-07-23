@@ -118,10 +118,24 @@ TEMU 文件从企业微信缓存或聊天记录下载到 `input/TEMU/日期/`，
 ### 自动分单（Windows）
 
 Windows 桌面助手支持按 Route Code 自动完成“查询、逐行选择、合并箱号、分配司机”。使用前请先
-在浏览器登录 iMile DC，然后在助手中输入：
+在浏览器登录 iMile DC，然后把分单清单直接粘贴进助手的大输入框。每行是一组任务：开头可以有
+一个或多个线路，剩余文字是司机姓名。例如下面这份清单可以原样粘贴：
 
-- 要处理的 Route Code 列表，用逗号分隔，例如 `404, 404 B, 404 S`
-- 司机的完整显示名，推荐填写 `姓名 | 司机ID`，例如 `Yang Jun-feng | D21023280101`
+```text
+201 Yang Jun
+302 303 宋修丞
+401 冯卫周3
+406 冯卫周2
+604 吴良梅
+606 吴良梅2
+605 冯卫周
+404 404B 404S 戴女士
+202 301 Travis
+```
+
+清单中的字母后缀要紧贴数字填写。程序会自动把 `404B`、`404S` 规范化为网页查询需要的
+`404 B`、`404 S`。只填司机姓名时选择搜索结果第一项；需要锁定具体司机时，可以在该行末尾填写
+`完整姓名 | 司机ID`。
 
 程序只会勾选输入框中明确列出的 Route Code，不会自行扩展同一基础码的其它字母后缀。例如输入
 `404, 404 B, 404 S` 时，即使搜索结果包含 `404 A` 也不会勾选；输入
@@ -130,17 +144,21 @@ Windows 桌面助手支持按 Route Code 自动完成“查询、逐行选择、
 始终逐行精确核对，不使用表头的“全选”复选框，也不会误选 `4040` 或 `1404`。
 
 选择完成后，程序点击“合并箱号”并等待页面状态稳定，再从刷新后的结果中重新读取箱号。只有
-结果收敛为一个唯一箱号时才会继续打开“分配”；不会沿用合并前缓存的箱号。司机下拉项必须与
-输入的完整显示名精确匹配。如果只输入姓名而出现同名结果、没有唯一箱号、页面未按预期刷新，
-或任何控件状态无法确认，程序会立即停止，不会猜测选项。司机选好后程序停留在分配弹窗，最终
-“确定”必须由操作人核对箱号和司机后手动点击。
+结果收敛为一个唯一箱号时才会继续打开“分配”；不会沿用合并前缓存的箱号。只填司机姓名时，
+程序选择搜索结果中页面显示的第一项；填写 `姓名 | 司机ID` 时则必须精确匹配姓名和 ID。没有唯一
+箱号、页面未按预期刷新或任何控件状态无法确认时，程序会立即停止。单组任务选好司机后停留在
+分配弹窗；批量任务也绝不会点击最终“确定”，而是等待操作人核对并手动确认。确认成功且目标箱号
+已从“待分配”移除后，程序才自动查询下一组；如果点击取消或分配未成功，整个队列停止。
 
-程序默认直接打开 DS 的“分箱预分配”页面；若页面路径变化，也可以在
-`wecom_download_config.json` 中修改 `dc_dispatch_url`，或使用左侧搜索入口。相关超时配置如下：
+程序会优先复用 Edge 中已经打开的 DS“分箱预分配”标签页；只有遍历所有 Edge 窗口仍找不到时才会
+新开一个页面，不会因识别到错误窗口而连续创建重复标签。运行后会先切换到“待分配”页签，并确认
+Boxcode / 运单数表格已经出现。相关超时配置如下：
 
 - `dc_dispatch_page_timeout_seconds`：等待“分箱预分配”页面可操作，默认 60 秒
+- `dc_dispatch_query_timeout_seconds`：等待 Route Code 查询结果完整稳定，默认 45 秒
 - `dc_dispatch_action_timeout_seconds`：等待查询、弹窗、司机选项及分配结果，默认 20 秒
 - `dc_dispatch_merge_timeout_seconds`：等待合并结果收敛为唯一箱号，默认 60 秒
+- `dc_dispatch_manual_confirm_timeout_seconds`：批量任务等待人工点击“确定”，默认 900 秒
 
 ### 目录结构
 
@@ -493,11 +511,25 @@ Previously, the process required manually copying tracking numbers, querying the
 ### Automatic Dispatch (Windows)
 
 The Windows desktop assistant can automate the Route Code workflow: query, select each matching row,
-merge box numbers, and assign the result to a driver. Sign in to iMile DC in the browser first, then enter:
+merge box numbers, and assign the result to a driver. Sign in to iMile DC, then paste the dispatch list into
+the assistant's single multiline field. Each line is one task: one or more leading routes followed by the
+driver name. This list can be pasted unchanged:
 
-- The exact Route Codes to process, comma-separated, for example `404, 404 B, 404 S`
-- The driver's full display name, preferably `Name | Driver ID`, for example
-  `Yang Jun-feng | D21023280101`
+```text
+201 Yang Jun
+302 303 宋修丞
+401 冯卫周3
+406 冯卫周2
+604 吴良梅
+606 吴良梅2
+605 冯卫周
+404 404B 404S 戴女士
+202 301 Travis
+```
+
+Write letter suffixes without an internal space in the pasted list. The assistant normalizes `404B` and
+`404S` to the page's required `404 B` and `404 S` format. A name-only driver entry selects the first displayed
+search result. Append `Full Name | Driver ID` when exact name-and-ID matching is required.
 
 The assistant checks only Route Codes explicitly listed in the input; it never guesses other letter suffixes.
 For `404, 404 B, 404 S`, a `404 A` search result is left unchecked. For `501, 501 A, 501 D`, a
@@ -508,18 +540,23 @@ values such as `4040` or `1404` are not selected.
 
 After selection, the assistant invokes **Merge box numbers**, waits for the page state to settle, and reads
 the box number again from the refreshed results. It opens **Assign** only when the result has converged to
-one unique box number; it never reuses a box number cached before the merge. The driver option must exactly
-match the supplied full display name. If a partial name is ambiguous, the merged result is not unique, the
-page does not refresh as expected, or any control state cannot be verified, the assistant stops immediately
-without guessing. After selecting the driver, it leaves the assignment dialog open. The operator must verify
-the box and driver and click the final **Confirm** button manually.
+one unique box number; it never reuses a box number cached before the merge. For a name-only driver entry,
+the assistant selects the first result displayed by the page. Supplying `Name | Driver ID` requires an exact
+name-and-ID match. If the merged result is not unique, the page does not refresh as expected, or a control
+state cannot be verified, the assistant stops immediately. It never clicks the final **Confirm** button. For
+a batch, it waits for the operator to confirm each dialog and verifies that the box has left **Pending
+assignment** before proceeding to the next group. Cancelled or unsuccessful assignment stops the queue.
 
-The assistant opens the DS **Box Pre-allocation** page directly by default. If that route changes, update
-`dc_dispatch_url` in `wecom_download_config.json` or use the left-side search. Dispatch timeout settings are:
+The assistant first reuses an existing DS **Box Pre-allocation** tab found across all Edge windows. It opens
+one new page only when no existing tab can be found, preventing repeated duplicates caused by binding to the
+wrong window. It then switches to **Pending assignment** and confirms that the Boxcode / waybill-count table
+is visible. Dispatch timeout settings are:
 
 - `dc_dispatch_page_timeout_seconds`: wait for the Box Pre-allocation page to become usable; default 60 seconds
+- `dc_dispatch_query_timeout_seconds`: wait for Route Code results to become complete and stable; default 45 seconds
 - `dc_dispatch_action_timeout_seconds`: wait for queries, dialogs, driver options, and assignment results; default 20 seconds
 - `dc_dispatch_merge_timeout_seconds`: wait for the merge result to converge to one box number; default 60 seconds
+- `dc_dispatch_manual_confirm_timeout_seconds`: wait for a manual batch confirmation; default 900 seconds
 
 ### Project Structure
 

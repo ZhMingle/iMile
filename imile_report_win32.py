@@ -9,7 +9,7 @@ import traceback
 
 from app_workflows import (
     open_wecom_config,
-    run_auto_dispatch,
+    run_auto_dispatch_manifest,
     run_dc_export,
     run_report,
     run_tracking,
@@ -37,6 +37,7 @@ WS_VSCROLL = 0x00200000
 ES_MULTILINE = 0x0004
 ES_AUTOVSCROLL = 0x0040
 ES_AUTOHSCROLL = 0x0080
+ES_WANTRETURN = 0x1000
 ES_READONLY = 0x0800
 BS_PUSHBUTTON = 0x00000000
 SS_LEFT = 0x00000000
@@ -147,6 +148,15 @@ def _configure_win32_api():
     user32.SetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPCWSTR]
     user32.SetWindowTextW.restype = wintypes.BOOL
     user32.EnableWindow.argtypes = [wintypes.HWND, wintypes.BOOL]
+    user32.MoveWindow.argtypes = [
+        wintypes.HWND,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.BOOL,
+    ]
+    user32.MoveWindow.restype = wintypes.BOOL
     user32.EnableWindow.restype = wintypes.BOOL
     user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
     user32.GetWindowTextLengthW.restype = ctypes.c_int
@@ -183,15 +193,19 @@ class QueueWriter:
 class IMileWin32App:
     def __init__(self):
         self.hwnd = None
+        self.title = None
+        self.subtitle = None
         self.tracking_button = None
         self.report_button = None
         self.wecom_button = None
         self.wecom_settings_button = None
         self.dc_export_button = None
+        self.dispatch_label = None
         self.dispatch_route_edit = None
         self.dispatch_driver_edit = None
         self.dispatch_button = None
         self.status = None
+        self.log_label = None
         self.log = None
         self.busy = False
         self.events = queue.Queue()
@@ -263,12 +277,82 @@ class IMileWin32App:
         user32.GetWindowTextW(handle, buffer, len(buffer))
         return buffer.value.strip()
 
+    def _move_control(self, handle, x, y, width, height):
+        if handle:
+            user32.MoveWindow(
+                handle,
+                int(x),
+                int(y),
+                max(1, int(width)),
+                max(1, int(height)),
+                True,
+            )
+
+    def _layout_controls(self, client_width, client_height):
+        if not self.log or client_width <= 0 or client_height <= 0:
+            return
+
+        left = 36
+        right = 36
+        content_width = max(520, client_width - left - right)
+        row_gap = 18
+        settings_width = 144
+        first_width = max(260, content_width - settings_width - row_gap)
+        half_gap = 32
+        half_width = max(230, (content_width - half_gap) // 2)
+
+        manifest_y = 382
+        available_height = max(180, client_height - manifest_y - 36)
+        target_manifest_height = max(128, int(available_height * 0.42))
+        max_manifest_height = max(80, client_height - 601)
+        manifest_height = min(target_manifest_height, max_manifest_height)
+        manifest_width = max(300, content_width - 222)
+        action_x = left + manifest_width + 20
+        action_y = manifest_y + max(0, (manifest_height - 52) // 2)
+
+        status_y = manifest_y + manifest_height + 18
+        log_label_y = status_y + 35
+        log_y = log_label_y + 30
+        log_height = max(40, client_height - log_y - 36)
+
+        self._move_control(self.title, 34, 22, content_width, 44)
+        self._move_control(self.subtitle, left, 68, content_width, 28)
+        self._move_control(self.wecom_button, left, 120, first_width, 62)
+        self._move_control(
+            self.wecom_settings_button,
+            left + first_width + row_gap,
+            120,
+            settings_width,
+            62,
+        )
+        self._move_control(self.tracking_button, left, 200, half_width, 62)
+        self._move_control(
+            self.dc_export_button,
+            left + half_width + half_gap,
+            200,
+            content_width - half_width - half_gap,
+            62,
+        )
+        self._move_control(self.report_button, left, 280, content_width, 62)
+        self._move_control(self.dispatch_label, left, 356, content_width, 24)
+        self._move_control(
+            self.dispatch_route_edit,
+            left,
+            manifest_y,
+            manifest_width,
+            manifest_height,
+        )
+        self._move_control(self.dispatch_button, action_x, action_y, 202, 52)
+        self._move_control(self.status, left, status_y, content_width, 28)
+        self._move_control(self.log_label, left, log_label_y, 120, 24)
+        self._move_control(self.log, left, log_y, content_width, log_height)
+
     def _wndproc(self, hwnd, msg, wparam, lparam):
         if msg == 1:  # WM_CREATE
             self.hwnd = hwnd
-            title = self._create_control("STATIC", "iMile 报表助手", SS_LEFT, 34, 22, 500, 44)
-            user32.SendMessageW(title, WM_SETFONT, self.title_font, True)
-            self._create_control(
+            self.title = self._create_control("STATIC", "iMile 报表助手", SS_LEFT, 34, 22, 500, 44)
+            user32.SendMessageW(self.title, WM_SETFONT, self.title_font, True)
+            self.subtitle = self._create_control(
                 "STATIC",
                 "WISEWAY 日常收件 · Auslink 偶发顺友 · 提取运单号 · 下载中心运单查询",
                 SS_LEFT,
@@ -327,50 +411,31 @@ class IMileWin32App:
                 62,
                 ID_REPORT,
             )
-            self._create_control(
+            self.dispatch_label = self._create_control(
                 "STATIC",
-                "Route Code（多个用逗号分隔）",
+                "分单清单（直接粘贴；每行：线路… 司机，例如 404 404B 404S 戴女士）",
                 SS_LEFT,
                 36,
-                365,
-                250,
-                24,
-            )
-            self._create_control(
-                "STATIC",
-                "司机（完整姓名或 姓名 | ID）",
-                SS_LEFT,
-                306,
-                365,
-                320,
+                356,
+                610,
                 24,
             )
             self.dispatch_route_edit = self._create_control(
                 "EDIT",
                 "",
-                WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL,
+                WS_BORDER | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
                 36,
-                390,
-                250,
-                38,
+                382,
+                590,
+                128,
                 ID_DISPATCH_ROUTE,
-            )
-            self.dispatch_driver_edit = self._create_control(
-                "EDIT",
-                "",
-                WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL,
-                306,
-                390,
-                320,
-                38,
-                ID_DISPATCH_DRIVER,
             )
             self.dispatch_button = self._create_control(
                 "BUTTON",
                 "⑤ 自动合并并选司机",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 646,
-                378,
+                415,
                 202,
                 52,
                 ID_AUTO_DISPATCH,
@@ -380,20 +445,25 @@ class IMileWin32App:
                 "就绪 · 日常请先打开 iMile x WISEWAY 主群",
                 SS_LEFT,
                 36,
-                458,
+                528,
                 812,
                 28,
             )
-            self._create_control("STATIC", "运行记录", SS_LEFT, 36, 493, 120, 24)
+            self.log_label = self._create_control("STATIC", "运行记录", SS_LEFT, 36, 563, 120, 24)
             self.log = self._create_control(
                 "EDIT",
                 "",
                 WS_BORDER | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY,
                 36,
-                523,
+                593,
                 812,
-                225,
+                155,
             )
+            return 0
+        if msg == WM_SIZE:
+            client_width = int(lparam) & 0xFFFF
+            client_height = (int(lparam) >> 16) & 0xFFFF
+            self._layout_controls(client_width, client_height)
             return 0
         if msg == WM_COMMAND:
             command_id = int(wparam) & 0xFFFF
@@ -416,26 +486,22 @@ class IMileWin32App:
                 if files:
                     self._start("正在生成并发送报表…", run_report, files[0])
             elif command_id == ID_AUTO_DISPATCH and not self.busy:
-                route_code = self._get_control_text(self.dispatch_route_edit)
-                driver_spec = self._get_control_text(self.dispatch_driver_edit)
-                if not route_code or not driver_spec:
-                    missing = []
-                    if not route_code:
-                        missing.append("Route Code")
-                    if not driver_spec:
-                        missing.append("司机")
+                manifest = self._get_control_text(self.dispatch_route_edit)
+                if not manifest:
                     user32.MessageBoxW(
                         self.hwnd,
-                        f"请先填写：{'、'.join(missing)}。",
+                        "请先粘贴分单清单，每行填写线路和司机。",
                         "无法自动分单",
                         0x30,
                     )
                 else:
+                    task_count = len([line for line in manifest.splitlines() if line.strip()])
                     confirmation = (
-                        f"Route Code：{route_code}\n"
-                        f"司机：{driver_spec}\n\n"
-                        "程序只会选择你列出的线路，合并箱号并选中上述司机。\n"
-                        "最后的“确定”按钮由你在网页中手动点击。\n"
+                        f"已粘贴 {task_count} 行分单清单。\n\n"
+                        "每行开头的线路属于同一组，后面的文字是司机。\n"
+                        "404B、404S 会自动转换为 404 B、404 S。\n"
+                        "每组选好司机后，最后的“确定”仍由你在网页中手动点击；\n"
+                        "确认成功后程序会自动继续下一组。\n"
                         "是否继续？"
                     )
                     result = user32.MessageBoxW(
@@ -446,10 +512,9 @@ class IMileWin32App:
                     )
                     if result == 6:
                         self._start(
-                            f"正在自动合并并选择司机：{route_code}…",
-                            run_auto_dispatch,
-                            route_code,
-                            driver_spec,
+                            f"正在处理 {task_count} 组分单任务…",
+                            run_auto_dispatch_manifest,
+                            manifest,
                         )
             return 0
         if msg == WM_APP_UPDATE:
