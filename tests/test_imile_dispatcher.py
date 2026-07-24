@@ -1,4 +1,6 @@
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 import imile_dispatcher as dispatcher
 
@@ -128,6 +130,17 @@ class RouteCodeMatchingTests(unittest.TestCase):
 
         self.assertEqual([row.row_key for row in matched], ["base", "a", "s"])
 
+    def test_composite_route_cell_is_split_and_normalized(self):
+        self.assertEqual(
+            dispatcher.route_codes_in_cell("203, 203 B，203 A；203 S"),
+            ("203", "203 B", "203 A", "203 S"),
+        )
+        self.assertEqual(
+            dispatcher.route_codes_in_cell("203\n203 B、203 A"),
+            ("203", "203 B", "203 A"),
+        )
+        self.assertEqual(dispatcher.route_codes_in_cell("203A"), ())
+
 
 class DriverResolutionTests(unittest.TestCase):
     def test_parse_dispatch_rule_accepts_name_and_stable_driver_id(self):
@@ -149,6 +162,25 @@ class DriverResolutionTests(unittest.TestCase):
 
         self.assertEqual(rule.route_base, "404,404 B,404 S")
         self.assertEqual(rule.route_codes, ("404", "404 B", "404 S"))
+        self.assertEqual(rule.family_bases, ())
+
+    def test_parse_dispatch_rule_accepts_all_suffix_variants(self):
+        rule = dispatcher.parse_dispatch_rule(
+            "202, 301 所有",
+            "Travis",
+        )
+
+        self.assertEqual(rule.route_base, "202,301")
+        self.assertEqual(rule.route_codes, ("202", "301"))
+        self.assertEqual(rule.family_bases, ("301",))
+
+    def test_parse_dispatch_rule_accepts_all_marker_aliases(self):
+        for route_spec in ("301ALL", "301*"):
+            with self.subTest(route_spec=route_spec):
+                rule = dispatcher.parse_dispatch_rule(route_spec, "Travis")
+                self.assertEqual(rule.route_base, "301")
+                self.assertEqual(rule.route_codes, ("301",))
+                self.assertEqual(rule.family_bases, ("301",))
 
     def test_parse_dispatch_rule_does_not_use_short_prefix_for_mixed_routes(self):
         rule = dispatcher.parse_dispatch_rule(
@@ -224,6 +256,18 @@ class DriverResolutionTests(unittest.TestCase):
         self.assertEqual(rules[0].driver_name, "Yang Jun-feng")
         self.assertEqual(rules[0].driver_id, "D21023280101")
 
+    def test_parse_dispatch_manifest_accepts_all_and_natural_assign_wording(self):
+        rules = dispatcher.parse_dispatch_manifest(
+            "203 所有分给rowan\n206 210 分给史毅"
+        )
+
+        self.assertEqual(rules[0].route_base, "203")
+        self.assertEqual(rules[0].route_codes, ("203",))
+        self.assertEqual(rules[0].family_bases, ("203",))
+        self.assertEqual(rules[0].driver_name, "rowan")
+        self.assertEqual(rules[1].route_codes, ("206", "210"))
+        self.assertEqual(rules[1].driver_name, "史毅")
+
     def test_parse_dispatch_manifest_rejects_spaced_route_suffix(self):
         with self.assertRaisesRegex(ValueError, "字母线路后缀请紧贴数字"):
             dispatcher.parse_dispatch_manifest("404 404 B 戴女士")
@@ -283,6 +327,152 @@ class DriverResolutionTests(unittest.TestCase):
         self.assertEqual(resolved.driver_id, "D21023280101")
 
 
+class EditInputTests(unittest.TestCase):
+    class FakeEdit:
+        def __init__(self):
+            self.value = ""
+            self.set_calls = []
+            self.iface_value = self
+
+        @property
+        def CurrentValue(self):
+            return self.value
+
+        def click_input(self):
+            return None
+
+        def has_keyboard_focus(self):
+            return True
+
+        def set_edit_text(self, value):
+            self.set_calls.append(value)
+            self.value = value
+
+        def SetValue(self, value):
+            self.value = value
+
+        def get_value(self):
+            return self.value
+
+        def type_keys(self, *_args, **_kwargs):
+            raise AssertionError("character-by-character typing must not be used")
+
+    def test_set_edit_text_writes_complete_value_once(self):
+        edit = self.FakeEdit()
+
+        dispatcher._set_edit_text(
+            edit,
+            "404,404 B,404 S",
+            "Route Code",
+            refetch=lambda: edit,
+        )
+
+        self.assertEqual(edit.set_calls, ["404,404 B,404 S"])
+        self.assertEqual(edit.value, "404,404 B,404 S")
+
+
+class DialogRecognitionTests(unittest.TestCase):
+    class Rect:
+        def __init__(self, left, top, right, bottom):
+            self.left = left
+            self.top = top
+            self.right = right
+            self.bottom = bottom
+
+    class Control:
+        def __init__(
+            self,
+            name,
+            control_type,
+            rect,
+            class_name="",
+            children=(),
+        ):
+            self._name = name
+            self._rect = rect
+            self._children = list(children)
+            self.element_info = SimpleNamespace(
+                class_name=class_name,
+                control_type=control_type,
+                automation_id="",
+            )
+
+        def window_text(self):
+            return self._name
+
+        def rectangle(self):
+            return self._rect
+
+        def is_visible(self):
+            return True
+
+        def descendants(self):
+            return list(self._children)
+
+    def make_page(self, include_supplier=False, box_text="BOX203"):
+        rect = self.Rect
+        children = [
+            self.Control(
+                "分配",
+                "Text",
+                rect(120, 120, 180, 150),
+            ),
+            self.Control(
+                "当前箱号",
+                "Text",
+                rect(120, 180, 210, 210),
+            ),
+            self.Control(
+                box_text,
+                "Text",
+                rect(220, 180, 340, 210),
+            ),
+            self.Control(
+                "分配司机",
+                "Text",
+                rect(120, 250, 220, 280),
+            ),
+            self.Control(
+                "请选择",
+                "ComboBox",
+                rect(120, 285, 500, 330),
+            ),
+        ]
+        if include_supplier:
+            children.append(
+                self.Control(
+                    "分配供应商",
+                    "Text",
+                    rect(120, 350, 260, 380),
+                )
+            )
+        modal = self.Control(
+            "",
+            "Group",
+            rect(100, 100, 600, 600),
+            class_name="z-imd-modal",
+        )
+        window = self.Control(
+            "",
+            "Window",
+            rect(0, 0, 1000, 1000),
+            children=[modal, *children],
+        )
+        return dispatcher.UIADispatchPage(window, "203", {}), modal
+
+    def test_nonstandard_modal_group_is_recognized(self):
+        page, modal = self.make_page()
+
+        self.assertIs(page._assign_dialog("BOX203"), modal)
+
+    def test_supplier_modal_and_box_prefix_are_rejected(self):
+        supplier_page, _ = self.make_page(include_supplier=True)
+        prefix_page, _ = self.make_page(box_text="BOX2039")
+
+        self.assertIsNone(supplier_page._assign_dialog("BOX203"))
+        self.assertIsNone(prefix_page._assign_dialog("BOX203"))
+
+
 class DispatchWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.rule = dispatcher.DispatchRule(
@@ -302,9 +492,7 @@ class DispatchWorkflowTests(unittest.TestCase):
         ]
         stale_after_click = list(before)
         merged = [
-            box_row("base-new", "301", "M900"),
-            box_row("a-new", "301 A", "M900"),
-            box_row("b-new", "301 B", "M900"),
+            box_row("merged", "301,301 A,301 B", "M900"),
             box_row("wrong", "3010", "B3010"),
         ]
         page = FakeDispatchPage(
@@ -314,8 +502,7 @@ class DispatchWorkflowTests(unittest.TestCase):
 
         dispatcher.dispatch_one(self.rule, page, timeout=1.0)
 
-        self.assertGreaterEqual(len(page.route_searches), 2)
-        self.assertTrue(all(value == "301" for value in page.route_searches))
+        self.assertEqual(page.route_searches, ["301"])
         self.assertEqual(page.selected_row_keys, [["base", "a", "b"]])
         self.assertEqual(page.merge_count, 1)
         self.assertEqual(page.opened_box_codes, ["M900"])
@@ -365,7 +552,9 @@ class DispatchWorkflowTests(unittest.TestCase):
             box_row("b", "301 B", "B3", 30),
         ]
         partial = [box_row("partial", "301", "M900", 10)]
-        fully_merged = [box_row("merged", "301", "M900", 60)]
+        fully_merged = [
+            box_row("merged", "301,301 A,301 B", "M900", 60)
+        ]
         page = FakeDispatchPage([before, partial, fully_merged], [self.driver])
 
         dispatcher.dispatch_one(self.rule, page, timeout=0.5)
@@ -374,12 +563,9 @@ class DispatchWorkflowTests(unittest.TestCase):
         self.assertEqual(page.confirm_count, 0)
 
     def test_404_selects_only_explicit_b_and_s_variants(self):
-        rule = dispatcher.DispatchRule(
-            "404",
-            "Yang Jun-feng",
-            "D21023280101",
-            ("404", "404 B", "404 S"),
-        )
+        rule = dispatcher.parse_dispatch_manifest(
+            "404 404B 404S Yang Jun-feng | D21023280101"
+        )[0]
         before = [
             box_row("base", "404", "B1"),
             box_row("a", "404 A", "DO-NOT-SELECT"),
@@ -399,6 +585,62 @@ class DispatchWorkflowTests(unittest.TestCase):
         self.assertEqual(page.selected_row_keys, [["base", "b", "s"]])
         self.assertEqual(page.opened_box_codes, ["M404"])
         self.assertEqual(page.confirm_count, 0)
+
+    def test_all_suffix_variants_selects_family_but_not_prefix_noise(self):
+        rule = dispatcher.parse_dispatch_manifest(
+            "301所有 Yang Jun-feng | D21023280101"
+        )[0]
+        before = [
+            box_row("base", "301", "B1", 10),
+            box_row("a", "301 A", "B2", 20),
+            box_row("b", "301 B", "B3", 30),
+            box_row("number", "3010", "DO-NOT-SELECT", 99),
+            box_row("no-space", "301A", "DO-NOT-SELECT", 99),
+        ]
+        merged = [
+            box_row("merged", "301,301 A,301 B", "M301", 60),
+            box_row("number", "3010", "DO-NOT-SELECT", 99),
+        ]
+        page = FakeDispatchPage([before, merged], [self.driver])
+
+        result = dispatcher.dispatch_one(rule, page, timeout=0.5)
+
+        self.assertEqual(page.route_searches, ["301"])
+        self.assertEqual(page.selected_row_keys, [["base", "a", "b"]])
+        self.assertEqual(result.matched_routes, ("301", "301 A", "301 B"))
+        self.assertEqual(page.opened_box_codes, ["M301"])
+        self.assertEqual(page.confirm_count, 0)
+
+    def test_composite_row_with_unrequested_route_fails_closed(self):
+        rule = dispatcher.parse_dispatch_rule("404", "戴女士")
+        page = FakeDispatchPage(
+            [[box_row("mixed", "404,404 A", "MIXED", 20)]],
+            [self.driver],
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "混在同一箱号"):
+            dispatcher.dispatch_one(rule, page, timeout=0.1)
+
+        self.assertEqual(page.selected_row_keys, [])
+        self.assertEqual(page.opened_box_codes, [])
+
+    def test_exact_404_does_not_select_unrequested_suffix_rows(self):
+        rule = dispatcher.parse_dispatch_rule("404", "Yang Jun-feng")
+        page = FakeDispatchPage(
+            [[
+                box_row("base", "404", "B404", 10),
+                box_row("b", "404 B", "DO-NOT-SELECT", 20),
+                box_row("s", "404 S", "DO-NOT-SELECT", 30),
+            ]],
+            [self.driver],
+        )
+
+        result = dispatcher.dispatch_one(rule, page, timeout=0.1)
+
+        self.assertEqual(result.matched_routes, ("404",))
+        self.assertEqual(result.merged_box_code, "B404")
+        self.assertEqual(page.selected_row_keys, [])
+        self.assertEqual(page.opened_box_codes, ["B404"])
 
     def test_501_selects_only_explicit_a_and_d_variants(self):
         rule = dispatcher.DispatchRule(
@@ -446,7 +688,7 @@ class DispatchWorkflowTests(unittest.TestCase):
             poll_interval=0,
         )
 
-        self.assertEqual(page.route_searches, ["301"])
+        self.assertEqual(page.route_searches, [])
 
     def test_manual_confirmation_stops_if_box_remains_pending(self):
         result = dispatcher.DispatchResult(
@@ -490,6 +732,110 @@ class DispatchWorkflowTests(unittest.TestCase):
                 verify_timeout=0,
                 poll_interval=0,
             )
+
+
+class BatchWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.rules = (
+            dispatcher.parse_dispatch_rule("201", "Yang Jun"),
+            dispatcher.parse_dispatch_rule("302", "宋修丞"),
+        )
+        self.driver = driver_option("宋修丞", "D21020000001")
+        self.result = dispatcher.DispatchResult(
+            route_base="302",
+            matched_routes=("302",),
+            old_box_codes=("B302",),
+            merged_box_code="M302",
+            driver=self.driver,
+        )
+
+    def test_batch_skips_no_pending_group_and_continues(self):
+        page = SimpleNamespace(query_timeout=1)
+        with (
+            mock.patch.object(dispatcher.dc, "_load_config", return_value={}),
+            mock.patch.object(dispatcher, "_ensure_dispatch_page", return_value=object()),
+            mock.patch.object(dispatcher, "UIADispatchPage", return_value=page),
+            mock.patch.object(
+                dispatcher,
+                "dispatch_one",
+                side_effect=[
+                    dispatcher.NoPendingRouteError("none"),
+                    self.result,
+                ],
+            ) as dispatch_mock,
+            mock.patch.object(
+                dispatcher,
+                "wait_for_manual_confirmation",
+            ) as wait_mock,
+        ):
+            summary = dispatcher._dispatch_rules(self.rules, config={})
+
+        self.assertEqual(dispatch_mock.call_count, 2)
+        wait_mock.assert_called_once()
+        self.assertIn("1 组已由你人工确认", summary)
+        self.assertIn("1 组当前无待分配结果", summary)
+
+    def test_batch_does_not_skip_other_runtime_errors(self):
+        page = SimpleNamespace(query_timeout=1)
+        with (
+            mock.patch.object(dispatcher.dc, "_load_config", return_value={}),
+            mock.patch.object(dispatcher, "_ensure_dispatch_page", return_value=object()),
+            mock.patch.object(dispatcher, "UIADispatchPage", return_value=page),
+            mock.patch.object(
+                dispatcher,
+                "dispatch_one",
+                side_effect=RuntimeError("unsafe UI failure"),
+            ) as dispatch_mock,
+            mock.patch.object(
+                dispatcher,
+                "wait_for_manual_confirmation",
+            ) as wait_mock,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "unsafe UI failure"):
+                dispatcher._dispatch_rules(self.rules, config={})
+
+        self.assertEqual(dispatch_mock.call_count, 1)
+        wait_mock.assert_not_called()
+
+    def test_batch_all_skipped_does_not_wait_for_confirmation(self):
+        page = SimpleNamespace(query_timeout=1)
+        with (
+            mock.patch.object(dispatcher.dc, "_load_config", return_value={}),
+            mock.patch.object(dispatcher, "_ensure_dispatch_page", return_value=object()),
+            mock.patch.object(dispatcher, "UIADispatchPage", return_value=page),
+            mock.patch.object(
+                dispatcher,
+                "dispatch_one",
+                side_effect=dispatcher.NoPendingRouteError("none"),
+            ) as dispatch_mock,
+            mock.patch.object(
+                dispatcher,
+                "wait_for_manual_confirmation",
+            ) as wait_mock,
+        ):
+            summary = dispatcher._dispatch_rules(self.rules, config={})
+
+        self.assertEqual(dispatch_mock.call_count, 2)
+        wait_mock.assert_not_called()
+        self.assertIn("0 组需要确认", summary)
+        self.assertIn("2 组当前无待分配结果", summary)
+
+    def test_single_rule_no_pending_returns_safe_skip_summary(self):
+        rule = self.rules[0]
+        page = SimpleNamespace()
+        with (
+            mock.patch.object(dispatcher.dc, "_load_config", return_value={}),
+            mock.patch.object(dispatcher, "_ensure_dispatch_page", return_value=object()),
+            mock.patch.object(dispatcher, "UIADispatchPage", return_value=page),
+            mock.patch.object(
+                dispatcher,
+                "dispatch_one",
+                side_effect=dispatcher.NoPendingRouteError("none"),
+            ),
+        ):
+            summary = dispatcher._dispatch_single_rule(rule, config={})
+
+        self.assertIn("已安全跳过", summary)
 
 
 if __name__ == "__main__":

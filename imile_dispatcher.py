@@ -21,6 +21,15 @@ CONFIRM_KEYS = {"确定", "确认", "confirm", "ok"}
 DRIVER_LABEL_KEYS = {"分配司机", "司机", "assigndriver", "driver"}
 NO_DATA_KEYS = {"暂无数据", "无数据", "nodata", "noresults"}
 RESULTS_PATTERN = re.compile(r"showing\s+(\d+)\s+of\s+(\d+)\s+results", re.IGNORECASE)
+ROUTE_CODE_PATTERN = re.compile(r"[0-9]{3,}(?: [A-Z])?")
+ROUTE_FAMILY_PATTERN = re.compile(
+    r"([0-9]{3,})\s*(?:所有|ALL|\*)",
+    re.IGNORECASE,
+)
+
+
+class NoPendingRouteError(RuntimeError):
+    """The query loaded completely, but none of its rows matched the rule."""
 
 
 @dataclass(frozen=True)
@@ -29,6 +38,7 @@ class DispatchRule:
     driver_name: str
     driver_id: str | None = None
     route_codes: tuple[str, ...] = ()
+    family_bases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -70,6 +80,14 @@ def normalize_route_code(value):
     return _collapse_spaces(value).upper()
 
 
+def _canonical_route_query(value):
+    return ",".join(
+        normalize_route_code(part)
+        for part in re.split(r"[,，]+", str(value or ""))
+        if normalize_route_code(part)
+    )
+
+
 def _normalize_person(value):
     return _collapse_spaces(value).casefold()
 
@@ -82,32 +100,78 @@ def route_code_matches(base, candidate):
     return re.fullmatch(rf"{re.escape(base_key)}(?: [A-Z])?", candidate_key) is not None
 
 
+def route_codes_in_cell(value):
+    parts = tuple(
+        dict.fromkeys(
+            normalize_route_code(part)
+            for part in re.split(r"[,，;；、\r\n]+", str(value or ""))
+            if normalize_route_code(part)
+        )
+    )
+    if not parts or any(ROUTE_CODE_PATTERN.fullmatch(part) is None for part in parts):
+        return ()
+    return parts
+
+
+def row_route_codes(row):
+    return route_codes_in_cell(row.route_code)
+
+
 def matching_route_rows(rows, base):
-    return [row for row in rows if route_code_matches(base, row.route_code)]
+    return [
+        row
+        for row in rows
+        if row_route_codes(row)
+        and all(route_code_matches(base, route) for route in row_route_codes(row))
+    ]
 
 
 def selected_route_rows(rows, route_codes):
     selected = {normalize_route_code(value) for value in route_codes}
-    return [row for row in rows if normalize_route_code(row.route_code) in selected]
+    return [
+        row
+        for row in rows
+        if row_route_codes(row)
+        and all(route in selected for route in row_route_codes(row))
+    ]
+
+
+def _parse_route_selectors(route_spec):
+    raw_selectors = [
+        _collapse_spaces(value)
+        for value in re.split(r"[,，]+", str(route_spec or ""))
+        if _collapse_spaces(value)
+    ]
+    if not raw_selectors:
+        raise ValueError("Route Code 不能为空。")
+
+    route_codes = []
+    family_bases = []
+    for selector in raw_selectors:
+        family_match = ROUTE_FAMILY_PATTERN.fullmatch(selector)
+        if family_match is not None:
+            route_code = normalize_route_code(family_match.group(1))
+            family_bases.append(route_code)
+        else:
+            route_code = normalize_route_code(selector)
+            if ROUTE_CODE_PATTERN.fullmatch(route_code) is None:
+                raise ValueError(f"Route Code 格式无效：{route_code}")
+        if route_code not in route_codes:
+            route_codes.append(route_code)
+
+    route_codes = tuple(route_codes)
+    family_bases = tuple(dict.fromkeys(family_bases))
+    route_query = ",".join(route_codes)
+    return route_query, route_codes, family_bases
 
 
 def _parse_route_codes(route_spec):
-    raw_codes = re.split(r"[,，]+", str(route_spec or ""))
-    route_codes = tuple(
-        dict.fromkeys(normalize_route_code(value) for value in raw_codes if normalize_route_code(value))
-    )
-    if not route_codes:
-        raise ValueError("Route Code 不能为空。")
-    for route_code in route_codes:
-        if not re.fullmatch(r"[0-9]{3,}(?: [A-Z])?", route_code):
-            raise ValueError(f"Route Code 格式无效：{route_code}")
-
-    route_query = ",".join(route_codes)
+    route_query, route_codes, _family_bases = _parse_route_selectors(route_spec)
     return route_query, route_codes
 
 
 def parse_dispatch_rule(route_spec, driver_spec):
-    route_base, route_codes = _parse_route_codes(route_spec)
+    route_base, route_codes, family_bases = _parse_route_selectors(route_spec)
 
     parts = [part.strip() for part in str(driver_spec or "").split("|")]
     if not parts or not parts[0]:
@@ -119,7 +183,13 @@ def parse_dispatch_rule(route_spec, driver_spec):
         raise ValueError("“|”后面缺少司机 ID。")
     if driver_id and not re.fullmatch(r"[Dd][0-9A-Za-z]+", driver_id):
         raise ValueError(f"司机 ID 格式无效：{driver_id}")
-    return DispatchRule(route_base, _collapse_spaces(parts[0]), driver_id, route_codes)
+    return DispatchRule(
+        route_base,
+        _collapse_spaces(parts[0]),
+        driver_id,
+        route_codes,
+        family_bases,
+    )
 
 
 def _split_dispatch_groups(value):
@@ -156,11 +226,29 @@ def parse_dispatch_batch(route_spec, driver_spec):
 
 
 def _manifest_route_code(token):
-    match = re.fullmatch(r"([0-9]{3,})([A-Za-z]?)", str(token or "").strip())
+    selector = _manifest_route_selector(token)
+    return selector[0] if selector is not None and not selector[1] else None
+
+
+def _manifest_route_selector(token):
+    raw = _collapse_spaces(token)
+    family_match = re.fullmatch(
+        r"([0-9]{3,})(?:所有|ALL|\*)",
+        raw,
+        re.IGNORECASE,
+    )
+    if family_match is not None:
+        return family_match.group(1), True
+
+    match = re.fullmatch(r"([0-9]{3,})([A-Za-z]?)", raw)
     if match is None:
         return None
     number, suffix = match.groups()
-    return number + (f" {suffix.upper()}" if suffix else "")
+    return number + (f" {suffix.upper()}" if suffix else ""), False
+
+
+def _is_all_marker(value):
+    return _collapse_spaces(value).casefold() in {"所有", "all", "*"}
 
 
 def parse_dispatch_manifest(manifest):
@@ -174,19 +262,23 @@ def parse_dispatch_manifest(manifest):
 
     rules = []
     for line_number, line in lines:
+        line = re.sub(r"\s*分给\s*", " ", line, count=1).strip()
         parts = line.split()
-        route_codes = []
-        split_at = 0
-        for split_at, token in enumerate(parts):
-            route_code = _manifest_route_code(token)
-            if route_code is None:
+        route_selectors = []
+        cursor = 0
+        while cursor < len(parts):
+            selector = _manifest_route_selector(parts[cursor])
+            if selector is None:
                 break
-            route_codes.append(route_code)
-        else:
-            split_at = len(parts)
+            route_code, is_family = selector
+            cursor += 1
+            if cursor < len(parts) and _is_all_marker(parts[cursor]):
+                is_family = True
+                cursor += 1
+            route_selectors.append(route_code + ("所有" if is_family else ""))
 
-        driver_parts = parts[split_at:]
-        if not route_codes:
+        driver_parts = parts[cursor:]
+        if not route_selectors:
             raise ValueError(f"第 {line_number} 行开头没有有效线路：{line}")
         if not driver_parts:
             raise ValueError(f"第 {line_number} 行缺少司机：{line}")
@@ -198,7 +290,7 @@ def parse_dispatch_manifest(manifest):
 
         try:
             rules.append(
-                parse_dispatch_rule(",".join(route_codes), " ".join(driver_parts))
+                parse_dispatch_rule(",".join(route_selectors), " ".join(driver_parts))
             )
         except ValueError as exc:
             raise ValueError(f"第 {line_number} 行输入无效：{exc}") from exc
@@ -248,17 +340,60 @@ def _rule_route_codes(rule):
     return rule.route_codes or (rule.route_base,)
 
 
-def _single_box(rows, route_codes, expected_routes=None, expected_waybills=None):
-    matches = selected_route_rows(rows, route_codes)
+def _rule_display_routes(rule):
+    family_bases = {
+        normalize_route_code(value)
+        for value in rule.family_bases
+    }
+    return tuple(
+        f"{route_code}所有"
+        if normalize_route_code(route_code) in family_bases
+        else route_code
+        for route_code in _rule_route_codes(rule)
+    )
+
+
+def _route_matches_rule(rule, route_code):
+    route = normalize_route_code(route_code)
+    family_bases = {
+        normalize_route_code(value)
+        for value in rule.family_bases
+    }
+    exact_codes = {
+        normalize_route_code(value)
+        for value in _rule_route_codes(rule)
+        if normalize_route_code(value) not in family_bases
+    }
+    return route in exact_codes or any(
+        route_code_matches(base, route)
+        for base in family_bases
+    )
+
+
+def matching_rule_rows(rows, rule):
+    return [
+        row
+        for row in rows
+        if row_route_codes(row)
+        and all(_route_matches_rule(rule, route) for route in row_route_codes(row))
+    ]
+
+
+def _single_box(rows, rule, expected_routes=None, expected_waybills=None):
+    matches = matching_rule_rows(rows, rule)
     if not matches or any(not row.box_code for row in matches):
         return None
     if expected_waybills is not None:
         counts = [row.waybill_count for row in matches]
         if any(value is None for value in counts) or sum(counts) != expected_waybills:
             return None
-    elif expected_routes is not None:
-        current_routes = {normalize_route_code(row.route_code) for row in matches}
-        if not set(expected_routes).issubset(current_routes):
+    if expected_routes is not None:
+        current_routes = {
+            route
+            for row in matches
+            for route in row_route_codes(row)
+        }
+        if set(expected_routes) != current_routes:
             return None
     box_codes = {row.box_code for row in matches}
     return next(iter(box_codes)) if len(box_codes) == 1 else None
@@ -266,42 +401,115 @@ def _single_box(rows, route_codes, expected_routes=None, expected_waybills=None)
 
 def dispatch_one(rule, page, timeout=45, initial_rows=None):
     if initial_rows is None:
-        page.search_routes(rule.route_base)
-        rows = page.read_route_rows()
+        loaded_rows = page.search_routes(rule.route_base)
+        rows = (
+            list(loaded_rows)
+            if loaded_rows is not None
+            else page.read_route_rows()
+        )
     else:
         rows = list(initial_rows)
     route_codes = _rule_route_codes(rule)
-    matches = selected_route_rows(rows, route_codes)
+    matches = matching_rule_rows(rows, rule)
+    unsafe_mixed_rows = [
+        row
+        for row in rows
+        if row_route_codes(row)
+        and any(_route_matches_rule(rule, route) for route in row_route_codes(row))
+        and not all(_route_matches_rule(rule, route) for route in row_route_codes(row))
+    ]
+    if unsafe_mixed_rows:
+        details = "；".join(
+            f"{row.box_code}: {row.route_code}"
+            for row in unsafe_mixed_rows
+        )
+        raise RuntimeError(
+            "查询结果中目标线路与未请求线路已混在同一箱号，无法安全拆分勾选："
+            f"{details}"
+        )
     if not matches:
         requested = ", ".join(route_codes)
-        raise RuntimeError(f"没有找到所选 Route Code（{requested}）的待分配箱号。")
+        raise NoPendingRouteError(
+            f"没有找到所选 Route Code（{requested}）的待分配箱号。"
+        )
     if any(not row.box_code for row in matches):
         raise RuntimeError(f"Route Code {rule.route_base} 的结果缺少箱号，已停止操作。")
 
-    matched_routes = tuple(dict.fromkeys(row.route_code for row in matches))
+    matched_routes = tuple(
+        dict.fromkeys(
+            route
+            for row in matches
+            for route in row_route_codes(row)
+        )
+    )
     old_box_codes = tuple(dict.fromkeys(row.box_code for row in matches))
-    expected_routes = {normalize_route_code(row.route_code) for row in matches}
+    expected_routes = set(matched_routes)
     counts = [row.waybill_count for row in matches]
     expected_waybills = sum(counts) if counts and all(value is not None for value in counts) else None
-    merged_box_code = _single_box(matches, route_codes)
+    merged_box_code = _single_box(
+        matches,
+        rule,
+        expected_routes=expected_routes,
+        expected_waybills=expected_waybills,
+    )
     if merged_box_code is None:
         page.select_rows([row.row_key for row in matches])
         page.merge_selected()
         deadline = time.monotonic() + max(0, float(timeout))
-        page.search_routes(rule.route_base)
+        started_at = time.monotonic()
+        refresh_attempted = False
+        last_read_error = None
         while True:
-            refreshed = page.read_route_rows()
+            try:
+                refreshed = page.read_route_rows()
+                last_read_error = None
+            except RuntimeError as exc:
+                # React briefly removes or rebuilds table controls after merge.
+                # A transient incomplete snapshot must not be treated as the
+                # final merged state.
+                refreshed = []
+                last_read_error = exc
             merged_box_code = _single_box(
                 refreshed,
-                route_codes,
+                rule,
                 expected_routes=expected_routes,
                 expected_waybills=expected_waybills,
             )
             if merged_box_code is not None:
                 break
-            if time.monotonic() >= deadline:
+            now = time.monotonic()
+            refresh_grace = min(2.0, max(0.5, float(timeout) / 4))
+            if (
+                not refresh_attempted
+                and now - started_at >= refresh_grace
+                and hasattr(page, "refresh_routes")
+            ):
+                refresh_attempted = True
+                remaining = max(0.1, deadline - now)
+                try:
+                    refreshed = page.refresh_routes(timeout=remaining)
+                except RuntimeError as exc:
+                    raise RuntimeError(
+                        f"Route Code {rule.route_base} 合并后刷新结果失败，"
+                        f"未执行司机分配：{exc}"
+                    ) from exc
+                merged_box_code = _single_box(
+                    refreshed,
+                    rule,
+                    expected_routes=expected_routes,
+                    expected_waybills=expected_waybills,
+                )
+                if merged_box_code is not None:
+                    break
+            if now >= deadline:
+                detail = (
+                    f"；最后一次读取错误：{last_read_error}"
+                    if last_read_error is not None
+                    else ""
+                )
                 raise RuntimeError(
-                    f"Route Code {rule.route_base} 合并后仍未收敛为唯一箱号，未执行司机分配。"
+                    f"Route Code {rule.route_base} 合并后仍未收敛为唯一箱号，"
+                    f"未执行司机分配{detail}。"
                 )
             time.sleep(0.25)
 
@@ -442,19 +650,6 @@ def _control_values(control):
 
 
 def _set_edit_text(control, value, field_name, guard=None, refetch=None):
-    errors = []
-    try:
-        control.set_edit_text("")
-    except Exception as exc:
-        errors.append(exc)
-        try:
-            control.iface_value.SetValue("")
-        except Exception as fallback_exc:
-            errors.append(fallback_exc)
-            raise RuntimeError(
-                f"无法直接写入{field_name}输入框；为避免误选网页文字，已停止操作：{errors[-1]}"
-            ) from fallback_exc
-
     focused = False
     focus_error = None
     for _attempt in range(2):
@@ -484,29 +679,38 @@ def _set_edit_text(control, value, field_name, guard=None, refetch=None):
 
     if guard is not None:
         guard()
-    try:
-        control.type_keys(
-            value,
-            pause=0.03,
-            with_spaces=True,
-            set_foreground=True,
-        )
-    except Exception as exc:
-        raise RuntimeError(f"无法向{field_name}输入框键入内容，已停止操作：{exc}") from exc
 
     expected = _collapse_spaces(value)
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline:
-        current = refetch() if refetch is not None else None
-        candidates = [item for item in (current, control) if item is not None]
-        if any(
-            _collapse_spaces(item) == expected
-            for candidate in candidates
-            for item in _control_values(candidate)
-        ):
-            return
-        time.sleep(0.15)
-    raise RuntimeError(f"写入{field_name}后无法读回确认，已停止操作。")
+    errors = []
+    writers = (
+        lambda: control.set_edit_text(value),
+        lambda: control.iface_value.SetValue(value),
+    )
+    for write_value in writers:
+        if guard is not None:
+            guard()
+        try:
+            write_value()
+        except Exception as exc:
+            errors.append(exc)
+            continue
+
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            current = refetch() if refetch is not None else None
+            candidates = [item for item in (current, control) if item is not None]
+            if any(
+                _collapse_spaces(item) == expected
+                for candidate in candidates
+                for item in _control_values(candidate)
+            ):
+                return
+            time.sleep(0.15)
+
+    detail = f"：{errors[-1]}" if errors else ""
+    raise RuntimeError(
+        f"写入{field_name}后无法完整读回“{value}”，已停止操作{detail}"
+    )
 
 
 def _page_ready(window):
@@ -701,6 +905,8 @@ class UIADispatchPage:
         self._rows = {}
         self._driver_controls = {}
         self._assign_dialog_confirmed = False
+        self._last_loaded_query = None
+        self._last_result_signature = None
 
     def _require_active_dispatch(self):
         if _dispatch_url_active(self.window):
@@ -800,10 +1006,28 @@ class UIADispatchPage:
         )
 
     def _is_loading(self):
-        for control in _visible_controls(self.window):
+        controls = _visible_controls(self.window)
+        try:
+            box_header, _count_header, _route_header, operation_header = self._headers()
+            box_rect = dc._rectangle(box_header)
+            operation_rect = dc._rectangle(operation_header)
+            table_left = box_rect.left - max(120, _rect_width(box_rect))
+            table_right = operation_rect.right
+            table_top = max(box_rect.bottom, operation_rect.bottom)
+        except RuntimeError:
+            return False
+
+        for control in controls:
             class_key = dc._control_class(control).casefold()
-            if dc._control_type(control) == "ProgressBar" or any(
+            is_loading = dc._control_type(control) == "ProgressBar" or any(
                 marker in class_key for marker in ("circularprogress", "spinner", "loading")
+            )
+            rect = dc._rectangle(control)
+            if (
+                is_loading
+                and rect is not None
+                and table_left <= _center(rect)[0] <= table_right
+                and _center(rect)[1] >= table_top
             ):
                 return True
         return False
@@ -823,43 +1047,100 @@ class UIADispatchPage:
         )
         return counts, values
 
-    def search_routes(self, base):
-        self._require_active_dispatch()
-        edit = _find_route_edit(self.window)
-        if edit is None:
-            raise RuntimeError("没有找到 Route Code 输入框。")
-        _set_edit_text(
-            edit,
-            base,
-            "Route Code",
-            self._require_active_dispatch,
-            lambda: _find_route_edit(self.window),
+    def _current_route_query_matches(self, edit, base):
+        expected = _canonical_route_query(base)
+        return bool(expected) and any(
+            _canonical_route_query(value) == expected
+            for value in _control_values(edit)
         )
-        query_deadline = time.monotonic() + min(5, self.action_timeout)
-        query_clicked = False
-        while time.monotonic() < query_deadline:
-            self._require_active_dispatch()
-            if _activate_text_action(self.window, QUERY_KEYS, prefer_right=True):
-                query_clicked = True
-                break
-            time.sleep(0.2)
-        if not query_clicked:
-            raise RuntimeError("没有找到“查询”按钮。")
-        deadline = time.monotonic() + self.action_timeout
-        started_at = time.monotonic()
+
+    def _existing_stable_result(self, timeout=0.8):
+        deadline = time.monotonic() + max(0, float(timeout))
         last_signature = None
         stable_count = 0
         while time.monotonic() < deadline:
-            time.sleep(0.4)
-            if self._is_loading() or time.monotonic() - started_at < 0.8:
+            self._require_active_dispatch()
+            if self._is_loading():
+                last_signature = None
+                stable_count = 0
+                time.sleep(0.15)
+                continue
+            try:
+                signature = self._stable_result_signature()
+            except RuntimeError:
+                return None
+            if signature is None:
+                return None
+            if signature == last_signature:
+                stable_count += 1
+            else:
+                last_signature = signature
+                stable_count = 1
+            if stable_count >= 2:
+                try:
+                    return signature, self.read_route_rows()
+                except RuntimeError:
+                    return None
+            time.sleep(0.15)
+        return None
+
+    def _click_query(self):
+        query_deadline = time.monotonic() + min(5, self.action_timeout)
+        while time.monotonic() < query_deadline:
+            self._require_active_dispatch()
+            if _activate_text_action(self.window, QUERY_KEYS, prefer_right=True):
+                return
+            time.sleep(0.2)
+        raise RuntimeError("没有找到“查询”按钮。")
+
+    def _wait_for_query_results(
+        self,
+        old_signature,
+        require_transition,
+        timeout=None,
+    ):
+        deadline = time.monotonic() + (
+            self.action_timeout if timeout is None else max(0.1, float(timeout))
+        )
+        started_at = time.monotonic()
+        last_signature = None
+        stable_count = 0
+        saw_loading = False
+        repeated_error = None
+        repeated_error_count = 0
+        while time.monotonic() < deadline:
+            time.sleep(0.25)
+            self._require_active_dispatch()
+            if self._is_loading():
+                saw_loading = True
+                last_signature = None
+                stable_count = 0
+                repeated_error = None
+                repeated_error_count = 0
                 continue
             try:
                 signature = self._stable_result_signature()
             except RuntimeError as exc:
-                if "分页" in str(exc) or "未识别到运单数" in str(exc):
-                    raise
-                signature = None
+                error_text = str(exc)
+                if error_text == repeated_error:
+                    repeated_error_count += 1
+                else:
+                    repeated_error = error_text
+                    repeated_error_count = 1
+                last_signature = None
+                stable_count = 0
+                if (
+                    repeated_error_count >= 5
+                    and time.monotonic() - started_at >= 2
+                ):
+                    raise RuntimeError(
+                        f"查询结果持续无法安全读取：{exc}"
+                    ) from exc
+                continue
+            repeated_error = None
+            repeated_error_count = 0
             if signature is None:
+                last_signature = None
                 stable_count = 0
                 continue
             if signature == last_signature:
@@ -867,9 +1148,102 @@ class UIADispatchPage:
             else:
                 last_signature = signature
                 stable_count = 1
-            if stable_count >= 2:
-                return
-        raise RuntimeError(f"查询 Route Code {base} 后结果没有完整、稳定地加载。")
+            transitioned = (
+                not require_transition
+                or saw_loading
+                or (
+                    old_signature is not None
+                    and signature != old_signature
+                )
+            )
+            if (
+                stable_count >= 2
+                and transitioned
+                and time.monotonic() - started_at >= 0.8
+            ):
+                try:
+                    rows = self.read_route_rows()
+                except RuntimeError:
+                    last_signature = None
+                    stable_count = 0
+                else:
+                    self._last_result_signature = signature
+                    return rows
+        if require_transition and old_signature is not None and not saw_loading:
+            raise RuntimeError(
+                "点击查询后没有观察到加载状态或结果变化；"
+                "为避免把上一条线路的旧结果当成新结果，已停止操作。"
+            )
+        raise RuntimeError("查询结果没有完整、稳定地加载。")
+
+    def search_routes(self, base):
+        self._require_active_dispatch()
+        edit = _find_route_edit(self.window)
+        if edit is None:
+            raise RuntimeError("没有找到 Route Code 输入框。")
+        same_query = self._current_route_query_matches(edit, base)
+        canonical_query = _canonical_route_query(base)
+        trusted_same_query = (
+            same_query
+            and self._last_loaded_query == canonical_query
+        )
+        if trusted_same_query:
+            existing = self._existing_stable_result()
+            if existing is not None:
+                signature, rows = existing
+                if signature == self._last_result_signature:
+                    self.route_base = base
+                    return rows
+
+        try:
+            old_signature = (
+                None if self._is_loading() else self._stable_result_signature()
+            )
+        except RuntimeError:
+            old_signature = None
+
+        if not same_query:
+            _set_edit_text(
+                edit,
+                base,
+                "Route Code",
+                self._require_active_dispatch,
+                lambda: _find_route_edit(self.window),
+            )
+        self.route_base = base
+        self._click_query()
+        rows = self._wait_for_query_results(
+            old_signature,
+            require_transition=not trusted_same_query,
+            timeout=self.query_timeout,
+        )
+        self._last_loaded_query = canonical_query
+        return rows
+
+    def refresh_routes(self, timeout=None):
+        """Refresh the current query once without rewriting the input field."""
+        self._require_active_dispatch()
+        edit = _find_route_edit(self.window)
+        if edit is None:
+            raise RuntimeError("没有找到 Route Code 输入框。")
+        if not self._current_route_query_matches(edit, self.route_base):
+            raise RuntimeError(
+                "Route Code 输入框已被修改；为避免刷新错误线路，已停止操作。"
+            )
+        try:
+            old_signature = (
+                None if self._is_loading() else self._stable_result_signature()
+            )
+        except RuntimeError:
+            old_signature = None
+        self._click_query()
+        rows = self._wait_for_query_results(
+            old_signature,
+            require_transition=old_signature is not None,
+            timeout=timeout,
+        )
+        self._last_loaded_query = _canonical_route_query(self.route_base)
+        return rows
 
     def read_route_rows(self):
         self._require_active_dispatch()
@@ -883,63 +1257,123 @@ class UIADispatchPage:
         route_x, _ = _center(route_rect)
         box_x, _ = _center(box_rect)
         count_x, _ = _center(count_rect)
-        route_tolerance = max(90, _rect_width(route_rect) * 1.8)
-        box_tolerance = max(110, _rect_width(box_rect) * 2.2)
-        count_tolerance = max(70, _rect_width(count_rect) * 1.8)
-        route_cells = []
+        operation_x, _ = _center(operation_rect)
+        box_left = box_x - (count_x - box_x) / 2
+        box_right = (box_x + count_x) / 2
+        count_left = box_right
+        count_right = (count_x + route_x) / 2
+        route_left = count_right
+        route_right = min(
+            (route_x + operation_x) / 2,
+            route_x + (route_x - count_x) / 2,
+        )
+
+        checkbox_candidates = []
         for control in controls:
-            if dc._control_type(control) not in {"Text", "DataItem", "Group"}:
-                continue
             rect = dc._rectangle(control)
-            name = _collapse_spaces(dc._control_name(control))
-            if rect is None or rect.top <= header_bottom or not name:
+            if rect is None or rect.top <= header_bottom:
                 continue
             x, y = _center(rect)
-            if abs(x - route_x) <= route_tolerance and re.fullmatch(r"[0-9A-Z]+(?: [A-Z])?", name.upper()):
-                route_cells.append((y, name, control))
+            class_key = dc._control_class(control).casefold()
+            if x >= box_left or not (
+                dc._control_type(control) == "CheckBox"
+                or "checkbox" in class_key
+            ):
+                continue
+            checkbox_candidates.append((y, control, rect))
+
+        checkbox_clusters = []
+        for candidate in sorted(checkbox_candidates, key=lambda item: item[0]):
+            if (
+                checkbox_clusters
+                and abs(
+                    candidate[0]
+                    - sum(item[0] for item in checkbox_clusters[-1])
+                    / len(checkbox_clusters[-1])
+                )
+                <= 12
+            ):
+                checkbox_clusters[-1].append(candidate)
+            else:
+                checkbox_clusters.append([candidate])
+
+        checkbox_rows = []
+        for cluster in checkbox_clusters:
+            y = sum(item[0] for item in cluster) / len(cluster)
+            _candidate_y, checkbox, _candidate_rect = max(
+                cluster,
+                key=lambda item: (
+                    dc._control_type(item[1]) == "CheckBox",
+                    -_rect_area(item[2]),
+                ),
+            )
+            checkbox_rows.append((checkbox, y))
 
         parsed = []
-        for y, route_code, _ in route_cells:
+        for index, (checkbox, y) in enumerate(checkbox_rows):
+            previous_y = checkbox_rows[index - 1][1] if index else None
+            next_y = (
+                checkbox_rows[index + 1][1]
+                if index + 1 < len(checkbox_rows)
+                else None
+            )
+            if previous_y is None:
+                half_height = (next_y - y) / 2 if next_y is not None else 40
+                row_top = max(header_bottom, y - max(30, half_height))
+            else:
+                row_top = (previous_y + y) / 2
+            if next_y is None:
+                half_height = (y - previous_y) / 2 if previous_y is not None else 40
+                row_bottom = y + max(30, half_height)
+            else:
+                row_bottom = (y + next_y) / 2
+
+            route_codes = []
             box_candidates = []
             count_candidates = []
-            checkbox_candidates = []
+            aligned_controls = []
             for control in controls:
                 rect = dc._rectangle(control)
                 if rect is None:
                     continue
                 x, control_y = _center(rect)
-                if abs(control_y - y) > 28:
+                if not row_top <= control_y < row_bottom:
                     continue
-                name = _collapse_spaces(dc._control_name(control))
-                if abs(x - box_x) <= box_tolerance and name and name.casefold() != "boxcode":
+                aligned_controls.append((control_y, x, control, rect))
+
+            for control_y, x, control, rect in sorted(
+                aligned_controls,
+                key=lambda item: (item[0], item[1], _rect_area(item[3])),
+            ):
+                raw_name = dc._control_name(control)
+                name = _collapse_spaces(raw_name)
+                if route_left <= x < route_right:
+                    for route_code in route_codes_in_cell(raw_name):
+                        if route_code not in route_codes:
+                            route_codes.append(route_code)
+                if box_left <= x < box_right and name and name.casefold() != "boxcode":
                     if re.fullmatch(r"[0-9A-Z_-]{5,}", name.upper()):
                         box_candidates.append((abs(x - box_x), name))
-                if abs(x - count_x) <= count_tolerance and re.fullmatch(r"[\d,]+", name):
+                if count_left <= x < count_right and re.fullmatch(r"[\d,]+", name):
                     count_candidates.append((abs(x - count_x), int(name.replace(",", ""))))
-                class_key = dc._control_class(control).casefold()
-                if x < box_rect.left and (
-                    dc._control_type(control) == "CheckBox" or "checkbox" in class_key
-                ):
-                    checkbox_candidates.append((abs(control_y - y), -x, control))
             box_code = min(box_candidates, default=(0, ""), key=lambda item: item[0])[1]
             waybill_count = min(count_candidates, default=(0, None), key=lambda item: item[0])[1]
-            checkbox = min(checkbox_candidates, default=(0, 0, None), key=lambda item: (item[0], item[1]))[2]
-            if checkbox is None:
+            if not route_codes:
                 continue
+            route_code = ",".join(route_codes)
             row_key = f"{box_code}\x1f{normalize_route_code(route_code)}\x1f{round(y)}"
             parsed.append(_UIRow(BoxRow(row_key, route_code, box_code, waybill_count), y, checkbox))
 
-        deduped = {}
-        for row in sorted(parsed, key=lambda item: item.y):
-            key = (normalize_route_code(row.value.route_code), row.value.box_code)
-            deduped.setdefault(key, row)
-        self._rows = {row.value.row_key: row for row in deduped.values()}
+        self._rows = {
+            row.value.row_key: row
+            for row in sorted(parsed, key=lambda item: item.y)
+        }
         if self._rows and any(row.value.waybill_count is None for row in self._rows.values()):
             raise RuntimeError("有表格行未识别到运单数，无法安全确认合并完整性，未执行选择。")
         counts = self._result_counts()
-        if counts is not None and counts[1] > len(self._rows):
+        if counts is not None and counts[1] != len(self._rows):
             raise RuntimeError(
-                f"查询返回 {counts[1]} 行，但当前只识别到 {len(self._rows)} 行。"
+                f"查询返回 {counts[1]} 行，但当前识别到 {len(self._rows)} 行。"
                 "页面可能有分页或控件尚未加载完成，未执行选择。"
             )
         return [row.value for row in self._rows.values()]
@@ -1111,40 +1545,118 @@ class UIADispatchPage:
         return [candidates[1]]
 
     def _dialogs(self):
-        candidates = [
-            control
-            for control in _visible_controls(self.window)
-            if (
-                "dialog" in dc._control_class(control).casefold()
-                or dc._control_type(control) == "Window"
-            )
-            and dc._rectangle(control) is not None
-        ]
-        return sorted(candidates, key=lambda item: _rect_area(dc._rectangle(item)), reverse=True)
+        window_rect = dc._rectangle(self.window)
+        window_area = _rect_area(window_rect) if window_rect is not None else 0
+        candidates = []
+        for control in _visible_controls(self.window):
+            rect = dc._rectangle(control)
+            if rect is None:
+                continue
+            class_key = dc._control_class(control).casefold()
+            control_type = dc._control_type(control)
+            if not (
+                control_type == "Window"
+                or any(marker in class_key for marker in ("dialog", "modal"))
+            ):
+                continue
+            area = _rect_area(rect)
+            if area < 20_000 or (window_area and area >= window_area * 0.9):
+                continue
+            candidates.append(control)
+        return sorted(candidates, key=lambda item: _rect_area(dc._rectangle(item)))
 
     def _assign_dialog(self, box_code=None):
         expected_box = str(box_code or getattr(self, "_assign_box_code", "")).strip()
         controls = _visible_controls(self.window)
+        valid = []
         for dialog in self._dialogs():
             dialog_rect = dc._rectangle(dialog)
-            title_key = dc._text_key(dc._control_name(dialog))
-            names = [
-                dc._control_name(control)
+            contained = [
+                control
                 for control in controls
                 if dc._rectangle(control) is not None
                 and _contains(dialog_rect, *_center(dc._rectangle(control)))
             ]
-            text_key = dc._text_key(" ".join(names))
-            if any(key in text_key for key in SUPPLIER_KEYS):
+            contained_keys = [
+                dc._text_key(dc._control_name(control))
+                for control in contained
+                if dc._control_name(control)
+            ]
+            if any(
+                supplier_key in control_key
+                for control_key in contained_keys
+                for supplier_key in SUPPLIER_KEYS
+            ):
                 continue
-            if self._assign_dialog_confirmed and title_key in ASSIGN_KEYS:
-                return dialog
-            has_assign = any(key in text_key for key in ASSIGN_KEYS)
-            has_driver = any(key in text_key for key in DRIVER_LABEL_KEYS)
-            has_box = not expected_box or expected_box.casefold() in " ".join(names).casefold()
-            if has_assign and has_driver and has_box:
-                return dialog
-        return None
+            title_controls = [
+                control
+                for control in contained
+                if dc._text_key(dc._control_name(control)) in ASSIGN_KEYS
+            ]
+            if dc._text_key(dc._control_name(dialog)) in ASSIGN_KEYS:
+                title_controls.append(dialog)
+            driver_labels = [
+                control
+                for control in contained
+                if dc._text_key(dc._control_name(control)) in DRIVER_LABEL_KEYS
+            ]
+            if not title_controls or not driver_labels:
+                continue
+
+            box_controls = []
+            if expected_box:
+                box_pattern = re.compile(
+                    rf"(?<![0-9A-Z_-]){re.escape(expected_box.upper())}"
+                    r"(?![0-9A-Z_-])"
+                )
+                box_controls = [
+                    control
+                    for control in contained
+                    if box_pattern.search(dc._control_name(control).upper())
+                ]
+                if not box_controls:
+                    continue
+
+            edits = [
+                control
+                for control in contained
+                if dc._control_type(control) in {"Edit", "ComboBox"}
+            ]
+            field_pairs = []
+            for label in driver_labels:
+                label_rect = dc._rectangle(label)
+                for edit in edits:
+                    edit_rect = dc._rectangle(edit)
+                    if (
+                        edit_rect.top >= label_rect.top
+                        and edit_rect.top <= label_rect.bottom + 120
+                    ):
+                        field_pairs.append((label, edit))
+            if not field_pairs:
+                continue
+
+            title_top = min(
+                dc._rectangle(control).top
+                for control in title_controls
+                if dc._rectangle(control) is not None
+            )
+            driver_top = min(
+                dc._rectangle(label).top
+                for label, _edit in field_pairs
+            )
+            if title_top >= driver_top:
+                continue
+            if box_controls:
+                box_top = min(dc._rectangle(control).top for control in box_controls)
+                if not title_top <= box_top <= driver_top:
+                    continue
+            valid.append(dialog)
+
+        return (
+            min(valid, key=lambda item: _rect_area(dc._rectangle(item)))
+            if valid
+            else None
+        )
 
     def open_assign(self, box_code):
         self._require_active_dispatch()
@@ -1260,7 +1772,7 @@ class UIADispatchPage:
             query,
             "司机",
             self._require_active_dispatch,
-            self._driver_edit,
+            self._driver_search_edit,
         )
         deadline = time.monotonic() + self.query_timeout
         started_at = time.monotonic()
@@ -1408,10 +1920,8 @@ def wait_for_manual_confirmation(
         time.sleep(max(0, float(poll_interval)))
 
     verify_deadline = time.monotonic() + max(0, float(verify_timeout))
-    route_codes = _rule_route_codes(rule)
     while True:
-        page.search_routes(rule.route_base)
-        rows = selected_route_rows(page.read_route_rows(), route_codes)
+        rows = matching_rule_rows(page.read_route_rows(), rule)
         if all(row.box_code != result.merged_box_code for row in rows):
             return
         if time.monotonic() >= verify_deadline:
@@ -1424,17 +1934,21 @@ def wait_for_manual_confirmation(
 
 def _dispatch_single_rule(rule, config=None):
     config = dc._load_config(config)
-    requested_routes = ", ".join(rule.route_codes)
+    requested_routes = ", ".join(_rule_display_routes(rule))
     print(f"[1/6] 正在进入“分箱预分配 / 待分配”：{requested_routes}")
     window = _ensure_dispatch_page(config)
     query_text = rule.route_base or "全部当前待分配线路"
     print(f"[2/6] 正在查询：{query_text}")
     page = UIADispatchPage(window, rule.route_base, config)
-    result = dispatch_one(
-        rule,
-        page,
-        timeout=max(5, int(config.get("dc_dispatch_merge_timeout_seconds", 60))),
-    )
+    try:
+        result = dispatch_one(
+            rule,
+            page,
+            timeout=max(5, int(config.get("dc_dispatch_merge_timeout_seconds", 60))),
+        )
+    except NoPendingRouteError:
+        print(f"[SKIPPED] {requested_routes} 当前没有匹配的待分配箱号。")
+        return f"{requested_routes} 当前没有匹配的待分配箱号，已安全跳过。"
     print(f"[3/6] 精确匹配线路：{', '.join(result.matched_routes)}")
     print(f"[4/6] 唯一合并箱号：{result.merged_box_code}")
     print(f"[5/6] 已选择司机：{result.driver.raw_text}")
@@ -1462,11 +1976,20 @@ def _dispatch_rules(rules, config=None):
     page = UIADispatchPage(window, rules[0].route_base, config)
     verify_timeout = max(page.query_timeout, 60)
     results = []
+    skipped = []
 
     for index, rule in enumerate(rules, start=1):
-        requested_routes = ", ".join(rule.route_codes)
+        requested_routes = ", ".join(_rule_display_routes(rule))
         print(f"[{index}/{total}] 正在处理线路：{requested_routes}")
-        result = dispatch_one(rule, page, timeout=merge_timeout)
+        try:
+            result = dispatch_one(rule, page, timeout=merge_timeout)
+        except NoPendingRouteError:
+            skipped.append(rule)
+            print(
+                f"[SKIPPED {index}/{total}] {requested_routes} "
+                "当前没有匹配的待分配箱号，继续下一组。"
+            )
+            continue
         print(
             f"[{index}/{total}] 已选中 {result.driver.raw_text}；"
             f"箱号 {result.merged_box_code}。"
@@ -1485,9 +2008,15 @@ def _dispatch_rules(rules, config=None):
         results.append(result)
         print(f"[{index}/{total}] 已确认从“待分配”移除。")
 
+    if not results:
+        return (
+            f"批量分单检查完成：0 组需要确认，{len(skipped)} 组当前无待分配结果，"
+            "均已安全跳过。"
+        )
     return (
-        f"批量分单完成：{len(results)} 组均已由你人工确认，"
-        "且已验证目标箱号离开“待分配”。"
+        f"批量分单完成：{len(results)} 组已由你人工确认，"
+        f"{len(skipped)} 组当前无待分配结果并已跳过；"
+        "已验证确认箱号离开“待分配”。"
     )
 
 
@@ -1510,7 +2039,7 @@ def dispatch_manifest(manifest, config=None):
     print(f"[清单] 已识别 {len(rules)} 组分单任务：")
     for index, rule in enumerate(rules, start=1):
         print(
-            f"  {index}. {', '.join(rule.route_codes)} → {rule.driver_name}"
+            f"  {index}. {', '.join(_rule_display_routes(rule))} → {rule.driver_name}"
             + (f" | {rule.driver_id}" if rule.driver_id else "")
         )
     return _dispatch_rules(rules, config=config)

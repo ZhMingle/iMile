@@ -130,17 +130,19 @@ Windows 桌面助手支持按 Route Code 自动完成“查询、逐行选择、
 606 吴良梅2
 605 冯卫周
 404 404B 404S 戴女士
-202 301 Travis
+202 301所有 Travis
 ```
 
 清单中的字母后缀要紧贴数字填写。程序会自动把 `404B`、`404S` 规范化为网页查询需要的
 `404 B`、`404 S`。只填司机姓名时选择搜索结果第一项；需要锁定具体司机时，可以在该行末尾填写
-`完整姓名 | 司机ID`。
+`完整姓名 | 司机ID`。也可以写成 `206 210 分给史毅`；其中“分给”会作为自然语言连接词忽略。
 
-程序只会勾选输入框中明确列出的 Route Code，不会自行扩展同一基础码的其它字母后缀。例如输入
+默认情况下，程序只会勾选输入框中明确列出的 Route Code，不会自行扩展同一基础码的其它字母后缀。
+需要选择基础码及其所有单字母后缀时，在基础码后写 `所有`：例如 `301所有` 会匹配 `301`、
+`301 A`、`301 B` 等，但不会匹配 `3010`、`1301`、`301A` 或 `301 AA`。例如输入
 `404, 404 B, 404 S` 时，即使搜索结果包含 `404 A` 也不会勾选；输入
-`501, 501 A, 501 D` 时不会勾选 `501 C`。同一基础线路会用基础码查询；像
-`309, 310, 311, 312` 这样的不同线路组合会用安全的共同前缀 `3` 查询，再只勾选明确列出的代码。程序
+`501, 501 A, 501 D` 时不会勾选 `501 C`。像 `309, 310, 311, 312` 这样的不同线路组合会一次性
+输入网页支持的逗号分隔查询，再只勾选明确列出的代码。程序
 始终逐行精确核对，不使用表头的“全选”复选框，也不会误选 `4040` 或 `1404`。
 
 选择完成后，程序点击“合并箱号”并等待页面状态稳定，再从刷新后的结果中重新读取箱号。只有
@@ -149,6 +151,8 @@ Windows 桌面助手支持按 Route Code 自动完成“查询、逐行选择、
 箱号、页面未按预期刷新或任何控件状态无法确认时，程序会立即停止。单组任务选好司机后停留在
 分配弹窗；批量任务也绝不会点击最终“确定”，而是等待操作人核对并手动确认。确认成功且目标箱号
 已从“待分配”移除后，程序才自动查询下一组；如果点击取消或分配未成功，整个队列停止。
+某组查询结果中没有匹配线路时，批量任务会记录为“已跳过”并继续下一组；分页、控件识别失败等
+非空结果错误仍会立即停止。查询成功后程序复用当前结果，不会为了轮询反复重输同一个 Route Code。
 
 程序会优先复用 Edge 中已经打开的 DS“分箱预分配”标签页；只有遍历所有 Edge 窗口仍找不到时才会
 新开一个页面，不会因识别到错误窗口而连续创建重复标签。运行后会先切换到“待分配”页签，并确认
@@ -524,17 +528,20 @@ driver name. This list can be pasted unchanged:
 606 吴良梅2
 605 冯卫周
 404 404B 404S 戴女士
-202 301 Travis
+202 301所有 Travis
 ```
 
 Write letter suffixes without an internal space in the pasted list. The assistant normalizes `404B` and
 `404S` to the page's required `404 B` and `404 S` format. A name-only driver entry selects the first displayed
-search result. Append `Full Name | Driver ID` when exact name-and-ID matching is required.
+search result. Append `Full Name | Driver ID` when exact name-and-ID matching is required. Natural wording
+such as `206 210 分给史毅` is also accepted; `分给` is treated as a connector.
 
-The assistant checks only Route Codes explicitly listed in the input; it never guesses other letter suffixes.
+By default, the assistant checks only Route Codes explicitly listed in the input. Append `所有` to a base
+code when its base and every single-letter suffix are intended: `301所有` matches `301`, `301 A`,
+`301 B`, and so on, but not `3010`, `1301`, `301A`, or `301 AA`.
 For `404, 404 B, 404 S`, a `404 A` search result is left unchecked. For `501, 501 A, 501 D`, a
-`501 C` result is left unchecked. Codes from one family use their shared base query. A mixed list such as
-`309, 310, 311, 312` uses the safe common prefix `3` and then checks only those exact codes. Rows are
+`501 C` result is left unchecked. A mixed list such as `309, 310, 311, 312` is entered once using the
+page's comma-separated query and then checks only those exact codes. Rows are
 always compared exactly and checked individually; the table header's select-all checkbox is not used, and
 values such as `4040` or `1404` are not selected.
 
@@ -546,6 +553,9 @@ name-and-ID match. If the merged result is not unique, the page does not refresh
 state cannot be verified, the assistant stops immediately. It never clicks the final **Confirm** button. For
 a batch, it waits for the operator to confirm each dialog and verifies that the box has left **Pending
 assignment** before proceeding to the next group. Cancelled or unsuccessful assignment stops the queue.
+A batch records a group with no matching pending rows as skipped and continues; pagination, incomplete
+parsing, or other UI errors still stop immediately. Once a query succeeds, its loaded result is reused
+instead of repeatedly retyping the same Route Code while polling.
 
 The assistant first reuses an existing DS **Box Pre-allocation** tab found across all Edge windows. It opens
 one new page only when no existing tab can be found, preventing repeated duplicates caused by binding to the
