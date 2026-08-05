@@ -64,6 +64,7 @@ The redirect URL must be added in the Feishu Developer Console. The app also nee
 - 用“中心运单查询”文件更新 `当日数据统计.xlsx`
 - 生成供应商分单、非奥克兰总览和线路预测图片
 - 按飞书配置把图片发送到对应群
+- 在 Windows 助手中输入一条文字，多选群后一次群发
 
 项目适合每天重复使用，减少人工统计、截图和逐群复制粘贴图片的工作量。
 
@@ -239,6 +240,7 @@ AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST
 
 - `AKL` 用于奥克兰分单统计
 - 非 `AKL` 用于非奥克兰到件货量统计
+- 路由码或派件网点为空的运单不会分摊到任何网点，而是在当天总量中单独显示为“未分配”
 - `商家编号` 用于区分 TEMU、菜鸟、顺友等渠道；菜鸟相关统计按菜鸟商家编号计算，不再按运单号 `36` 开头猜测
 
 #### 最终结果文件
@@ -298,6 +300,36 @@ receive_id_type + receive_id（app/user 消息）
 - `webhook`：走原来的 webhook / 机器人。
 - `user`：用你自己的飞书账号发送。第一次运行会打开授权页，授权后脚本会把 `user_refresh_token` 写入 `lark_config.json`。
 - `app`：用应用机器人身份发送。
+
+Windows 助手中的“群发文字消息”会默认读取现有 `messages` 列表作为可选群。输入消息后，
+在右侧搜索框输入群名的一部分即可筛选；直接逐个点击群名即可选中或取消选中多个群。已选群会在
+不同搜索之间保留，点击“发送文字到所选群”后会再次显示群名和数量供确认。同一条文字会按每个目标
+原有的 `webhook`、`app` 或 `user` 方式发送。
+
+如果不想在列表中显示全部图片目标，可以在 `lark_config.json` 顶层单独配置
+`text_destinations`。定义该字段后，文字群发只显示这里列出的群：
+
+```json
+{
+  "text_destinations": [
+    {
+      "name": "管理群",
+      "send_as": "app",
+      "receive_id_type": "chat_id",
+      "receive_id": "oc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "name": "运营群",
+      "send_as": "webhook",
+      "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/...",
+      "secret": ""
+    }
+  ]
+}
+```
+
+`app` / `user` 方式发送的文字会和图片一样，把 `message_id` 记录到
+`output/sent_messages.jsonl`，可使用现有撤回功能；Webhook 文字不能通过该记录撤回。
 
 中国版飞书使用：
 
@@ -649,6 +681,7 @@ Rules:
 
 - `AKL` is used for Auckland dispatch statistics
 - Non-`AKL` rows are used for non-Auckland inbound statistics
+- Rows with a blank route or delivery station are not allocated to any station; they appear once as **Unassigned** in the daily total
 - `商家编号` / merchant ID is used to distinguish TEMU, Cainiao, Sunyou, and other channels. Cainiao-related metrics are calculated by Cainiao merchant ID, no longer by guessing from waybill numbers starting with `36`.
 
 #### Final result workbook

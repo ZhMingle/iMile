@@ -84,11 +84,14 @@ def clean_number(value):
 def parse_total_breakdown(value, province_count):
     text = clean_text(value)
     numbers = [clean_number(match) for match in re.findall(r"-?\d+(?:\.\d+)?", text)]
+    if len(numbers) >= 4:
+        return numbers[0], numbers[1], numbers[2], numbers[3]
     if len(numbers) >= 3:
-        return numbers[0], numbers[1], numbers[2]
+        unassigned_count = max(0, numbers[0] - numbers[1] - numbers[2])
+        return numbers[0], numbers[1], numbers[2], unassigned_count
     if len(numbers) == 1:
-        return numbers[0], numbers[0] - province_count, province_count
-    return 0, 0, province_count
+        return numbers[0], numbers[0] - province_count, province_count, 0
+    return 0, 0, province_count, 0
 
 
 def text_size(draw, text, font):
@@ -254,7 +257,18 @@ def render_side_by_side_route_image(path, tables):
     image.save(path)
 
 
-def render_non_auckland_overview(path, overview, board_3l, board_5l, aliexpress_count, sunyou_count, total_count, auckland_count, province_count):
+def render_non_auckland_overview(
+    path,
+    overview,
+    board_3l,
+    board_5l,
+    aliexpress_count,
+    sunyou_count,
+    total_count,
+    auckland_count,
+    province_count,
+    unassigned_count,
+):
     cell_h = 36
     title_h = 60
     header_h = 48
@@ -303,9 +317,17 @@ def render_non_auckland_overview(path, overview, board_3l, board_5l, aliexpress_
 
     total_x = x0 + main_widths[0] + main_widths[1]
     total_width = main_widths[2] + main_widths[3]
-    total_display = f"{total_count}（{auckland_count} + {province_count}）"
+    if unassigned_count:
+        total_display = (
+            f"{total_count}（{auckland_count} + {province_count}"
+            f" + {unassigned_count}未分配）"
+        )
+        total_header = "当天总量（奥克兰 + 外省 + 未分配）"
+    else:
+        total_display = f"{total_count}（{auckland_count} + {province_count}）"
+        total_header = "当天总量（奥克兰 + 外省）"
     rect(draw, [total_x, y, total_x + total_width, y + header_h], fill="#FFC000", outline=BLACK, width=line_width())
-    draw_centered_text(draw, (total_x, y, total_x + total_width, y + header_h), "当天总量（奥克兰 + 外省）", FONT_HEADER)
+    draw_centered_text(draw, (total_x, y, total_x + total_width, y + header_h), total_header, FONT_HEADER)
     rect(draw, [total_x, y + header_h, total_x + total_width, y + header_h + total_value_h], fill="#FFC000", outline=BLACK, width=line_width())
     draw_centered_text(draw, (total_x, y + header_h, total_x + total_width, y + header_h + total_value_h), total_display, FONT_TOTAL_NUMBER)
 
@@ -384,10 +406,16 @@ def build_non_auckland_messages():
     sunyou_count = clean_number(df.iloc[13, 2])
     province_total = overview.loc[overview["station"].eq("总计"), "arrival_volume"]
     province_count = clean_number(province_total.iloc[0]) if not province_total.empty else 0
-    total_count, auckland_count, province_count = parse_total_breakdown(df.iloc[13, 5], province_count)
+    total_count, auckland_count, province_count, unassigned_count = (
+        parse_total_breakdown(df.iloc[13, 5], province_count)
+    )
     if not total_count:
         total_count = clean_number(df.iloc[13, 3]) or clean_number(df.iloc[13, 5])
         auckland_count = clean_number(df.iloc[13, 4]) or total_count - province_count
+        unassigned_count = max(
+            0,
+            total_count - auckland_count - province_count,
+        )
 
     render_non_auckland_overview(
         PROVINCE_DIR / "非奥克兰总览.png",
@@ -399,6 +427,7 @@ def build_non_auckland_messages():
         total_count,
         auckland_count,
         province_count,
+        unassigned_count,
     )
 
 

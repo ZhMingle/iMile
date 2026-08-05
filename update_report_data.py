@@ -70,7 +70,11 @@ def clean_text(value):
 
 
 def clean_route_code(value):
-    return re.sub(r"\s+", "", clean_text(value))
+    route_code = re.sub(r"\s+", "", clean_text(value))
+    # Excel exports sometimes store numeric route codes as decimals (for
+    # example, 306 becomes 306.0).  The report template stores the same code as
+    # text, so normalize only an all-zero decimal suffix before matching.
+    return re.sub(r"^(\d+)\.0+$", r"\1", route_code)
 
 
 def canonical_source_column(value):
@@ -321,6 +325,21 @@ def station_count(counts, station):
     return sum(counts.get(alias, 0) for alias in aliases)
 
 
+def station_count_with_display_alias(counts, station, display_alias):
+    keys = {
+        clean_text(value)
+        for value in [*STATION_ALIASES.get(station, [station]), display_alias]
+        if clean_text(value)
+    }
+    return sum(counts.get(key, 0) for key in keys)
+
+
+def auckland_route_counts(df):
+    return Counter(
+        df.loc[df["派件网点简码"].eq("AKL"), "路由码"]
+    )
+
+
 def ensure_non_auckland_station_rows(ws):
     current_total_row = find_total_row(ws, column=1)
     target_total_row = 3 + len(NON_AUCKLAND_STATIONS)
@@ -436,7 +455,16 @@ def update_auckland_sheet(wb, route_counts):
     return total
 
 
-def update_non_auckland_sheet(wb, station_counts, cainiao_counts, sunyou_counts, aliexpress_count, sunyou_count, auckland_total):
+def update_non_auckland_sheet(
+    wb,
+    station_counts,
+    cainiao_counts,
+    sunyou_counts,
+    aliexpress_count,
+    sunyou_count,
+    auckland_total,
+    source_total,
+):
     ws = wb["非奥克兰"]
     ws.cell(1, 1).value = f"{REPORT_DATE}非奥克兰到件货量"
     ws.cell(1, 9).value = REPORT_DATE
@@ -446,7 +474,11 @@ def update_non_auckland_sheet(wb, station_counts, cainiao_counts, sunyou_counts,
         station = clean_text(ws.cell(row, 1).value)
         alias = clean_text(ws.cell(row, 2).value)
 
-        arrival = station_count(station_counts, station) + station_counts.get(alias, 0)
+        arrival = station_count_with_display_alias(
+            station_counts,
+            station,
+            alias,
+        )
         if station == "RTR":
             arrival = sum(count for key, count in station_counts.items() if key.startswith("RTR"))
 
@@ -465,15 +497,32 @@ def update_non_auckland_sheet(wb, station_counts, cainiao_counts, sunyou_counts,
     ws.cell(13, 3).value = "顺友单量"
     ws.cell(14, 3).value = sunyou_count
 
-    write_total_breakdown(ws, auckland_total, non_auckland_total)
+    write_total_breakdown(
+        ws,
+        auckland_total,
+        non_auckland_total,
+        source_total,
+    )
 
     write_board_forecast_values(ws)
 
     return non_auckland_total
 
 
-def write_total_breakdown(ws, auckland_total, non_auckland_total):
-    total = auckland_total + non_auckland_total
+def write_total_breakdown(
+    ws,
+    auckland_total,
+    non_auckland_total,
+    source_total=None,
+):
+    classified_total = auckland_total + non_auckland_total
+    total = classified_total if source_total is None else source_total
+    unassigned_total = total - classified_total
+    if unassigned_total < 0:
+        raise ValueError(
+            "Auckland and non-Auckland totals exceed the unique source total; "
+            "the report would double-count waybills."
+        )
 
     source_header = ws.cell(13, 6)
     source_value = ws.cell(14, 6)
@@ -507,8 +556,15 @@ def write_total_breakdown(ws, auckland_total, non_auckland_total):
 
     header_cell = ws.cell(13, 6)
     value_cell = ws.cell(14, 6)
-    header_cell.value = "当天总量（奥克兰 + 外省）"
-    value_cell.value = f"{total}({auckland_total}+{non_auckland_total})"
+    if unassigned_total:
+        header_cell.value = "当天总量（奥克兰 + 外省 + 未分配）"
+        value_cell.value = (
+            f"{total}({auckland_total}+{non_auckland_total}"
+            f"+{unassigned_total})"
+        )
+    else:
+        header_cell.value = "当天总量（奥克兰 + 外省）"
+        value_cell.value = f"{total}({auckland_total}+{non_auckland_total})"
 
     for attr, style in header_style.items():
         setattr(header_cell, attr, copy(style))
@@ -590,7 +646,7 @@ def main():
     df = load_source_data()
 
     station_counts = Counter(df["派件网点简码"])
-    route_counts = Counter(df["路由码"])
+    route_counts = auckland_route_counts(df)
     cainiao_mask = df[MERCHANT_COLUMN].eq(CAINIAO_MERCHANT_CODE)
     sunyou_mask = df[MERCHANT_COLUMN].eq(SUNYOU_MERCHANT_CODE)
     cainiao_counts = Counter(df.loc[cainiao_mask, "派件网点简码"])
@@ -617,6 +673,7 @@ def main():
         aliexpress_count,
         sunyou_count,
         auckland_total,
+        len(df),
     )
 
     overlap = df[(df["派件网点简码"] != "AKL") & df["路由码"].isin(get_auckland_route_codes(wb))]
@@ -634,7 +691,9 @@ def main():
     print(f"Source rows: {len(df)}")
     print(f"Auckland route total: {auckland_total}")
     print(f"Non-Auckland station total: {non_auckland_total}")
-    print(f"Workbook total logic: {auckland_total + non_auckland_total}")
+    classified_total = auckland_total + non_auckland_total
+    print(f"Workbook total logic: {len(df)}")
+    print(f"Unassigned station total: {len(df) - classified_total}")
     print(f"Unique waybill total: {df['运单号'].nunique()}")
     merchant_counts = Counter(df[MERCHANT_COLUMN])
     print(

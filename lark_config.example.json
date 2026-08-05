@@ -5,6 +5,20 @@
   "redirect_uri": "http://localhost:8765/callback",
   "user_scope": "im:message im:message.send_as_user im:message:recall",
   "send_as": "auto",
+  "text_destinations": [
+    {
+      "name": "Management group",
+      "send_as": "app",
+      "receive_id_type": "chat_id",
+      "receive_id": "oc_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    {
+      "name": "Operations webhook group",
+      "send_as": "webhook",
+      "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+      "secret": ""
+    }
+  ],
   "messages": [
     {
       "name": "Old webhook style",

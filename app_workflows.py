@@ -2,12 +2,23 @@ import importlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 
 
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 os.chdir(APP_DIR)
+
+ROUTE_GROUP_CODES = ("WLTV2", "HMT", "TRG", "NPL", "HST", "PMN", "TPO", "RTR", "WGR")
+
+
+def load_lark_config(config_path=None):
+    config_path = Path(config_path or APP_DIR / "lark_config.json")
+    if not config_path.exists():
+        raise RuntimeError("找不到 lark_config.json，请先完成飞书配置。")
+    config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+    return config_path, config
 
 
 def configured_bot_messages(config_path=None):
@@ -37,6 +48,53 @@ def configured_bot_messages(config_path=None):
         suffix = " 等" if len(incomplete) > 5 else ""
         raise RuntimeError(f"以下机器人消息缺少群 ID：{names}{suffix}")
     return messages
+
+
+def configured_text_destinations(config_path=None):
+    _, config = load_lark_config(config_path)
+    destinations = list(config.get("text_destinations") or config.get("messages") or [])
+    return [destination for destination in destinations if destination.get("name")]
+
+
+def route_group_destination_indexes(destinations, text):
+    normalized_text = str(text).upper()
+    requested_codes = [
+        code
+        for code in ROUTE_GROUP_CODES
+        if re.search(rf"(?<![A-Z0-9]){re.escape(code)}(?![A-Z0-9])", normalized_text)
+    ]
+    if not requested_codes:
+        return [], []
+
+    matched_indexes = []
+    for index, destination in enumerate(destinations):
+        name = str(destination.get("name", "")).strip()
+        normalized_name = name.upper()
+        if normalized_name.startswith("SEND AS ME "):
+            continue
+        if any(code in normalized_name for code in requested_codes):
+            matched_indexes.append(index)
+    return requested_codes, matched_indexes
+
+
+def run_text_message(text, destination_indexes, config_path=None):
+    config_path, config = load_lark_config(config_path)
+    destinations = configured_text_destinations(config_path)
+    indexes = sorted(set(int(index) for index in destination_indexes))
+    if not indexes:
+        raise RuntimeError("请至少选择一个群。")
+    if any(index < 0 or index >= len(destinations) for index in indexes):
+        raise RuntimeError("群列表已经变化，请重新打开程序后再试。")
+
+    selected = [destinations[index] for index in indexes]
+    sender = importlib.import_module("send_lark_images")
+    sent_count = sender.send_text_to_destinations(
+        text,
+        selected,
+        config,
+        config_path=config_path,
+    )
+    return f"文字消息已发送到 {sent_count} 个群。"
 
 
 def run_tracking(files):

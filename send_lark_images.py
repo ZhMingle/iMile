@@ -287,6 +287,29 @@ def send_image_with_retry(webhook, image_key, secret="", max_attempts=5):
         raise RuntimeError(f"Failed to send image: {data}")
 
 
+def send_text_with_retry(webhook, text, secret="", max_attempts=5):
+    waits = [10, 20, 40, 80]
+    for attempt in range(max_attempts):
+        payload = {
+            "msg_type": "text",
+            "content": {"text": text},
+        }
+        if secret:
+            timestamp = str(int(time.time()))
+            payload["timestamp"] = timestamp
+            payload["sign"] = sign(secret, timestamp)
+
+        data = post_json(webhook, payload)
+        if data.get("code") == 0:
+            return data
+        if data.get("code") == RATE_LIMIT_CODE and attempt < max_attempts - 1:
+            wait_seconds = waits[min(attempt, len(waits) - 1)]
+            print(f"Rate limited by Lark; waiting {wait_seconds}s before retry...")
+            time.sleep(wait_seconds)
+            continue
+        raise RuntimeError(f"Failed to send text: {data}")
+
+
 def send_image_to_receiver(receive_id_type, receive_id, image_key, access_token, config, name="report image"):
     url = f"{api_url(config, SEND_MESSAGE_PATH)}?receive_id_type={receive_id_type}"
     data = post_json(
@@ -342,6 +365,45 @@ def send_image_to_receiver_with_retry(
             time.sleep(wait_seconds)
             continue
         raise RuntimeError(f"Failed to send image to receiver: {data}")
+
+
+def send_text_to_receiver_with_retry(
+    receive_id_type,
+    receive_id,
+    text,
+    access_token,
+    config,
+    max_attempts=5,
+):
+    waits = [10, 20, 40, 80]
+    for attempt in range(max_attempts):
+        url = f"{api_url(config, SEND_MESSAGE_PATH)}?receive_id_type={receive_id_type}"
+        try:
+            data = post_json(
+                url,
+                {
+                    "receive_id": receive_id,
+                    "msg_type": "text",
+                    "content": json.dumps({"text": text}, ensure_ascii=False),
+                },
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        except RuntimeError as error:
+            message = str(error)
+            if str(MISSING_PERMISSION_CODE) in message and "im:message:send" in message:
+                raise RuntimeError(
+                    "The Feishu /im/v1/messages endpoint did not receive a token with "
+                    "the required message permission."
+                ) from error
+            raise
+        if data.get("code") == 0:
+            return data
+        if data.get("code") == RATE_LIMIT_CODE and attempt < max_attempts - 1:
+            wait_seconds = waits[min(attempt, len(waits) - 1)]
+            print(f"Rate limited by Lark; waiting {wait_seconds}s before retry...")
+            time.sleep(wait_seconds)
+            continue
+        raise RuntimeError(f"Failed to send text to receiver: {data}")
 
 
 def get_message_id(data):
@@ -533,6 +595,29 @@ def validate_messages(messages, default_send_as):
     return errors
 
 
+def validate_destinations(destinations, default_send_as):
+    errors = []
+    for index, destination in enumerate(destinations, start=1):
+        send_as = message_send_as(destination, default_send_as)
+        has_webhook = destination.get("webhook", "").startswith("https://")
+        has_receiver = destination.get("receive_id_type") and destination.get("receive_id")
+        if send_as not in {"webhook", "app", "user"}:
+            errors.append(
+                f"{index}. invalid send_as for "
+                f"{destination.get('name', '<unnamed>')}: {send_as}"
+            )
+        elif send_as == "webhook" and not has_webhook:
+            errors.append(
+                f"{index}. configure webhook for {destination.get('name', '<unnamed>')}"
+            )
+        elif send_as in {"app", "user"} and not has_receiver:
+            errors.append(
+                f"{index}. configure receive_id_type+receive_id for "
+                f"{destination.get('name', '<unnamed>')}"
+            )
+    return errors
+
+
 def print_plan(messages, default_send_as):
     print("Send plan:")
     for index, message in enumerate(messages, start=1):
@@ -586,6 +671,75 @@ def get_tokens(config, config_path, modes, user_token_cache_path=DEFAULT_USER_TO
         elif not new_refresh_token:
             print(f"Cached user access token in {user_token_cache_path}.")
     return tokens
+
+
+def send_text_to_destinations(
+    text,
+    destinations,
+    config,
+    config_path=CONFIG_FILE,
+    sent_log_path=DEFAULT_SENT_LOG,
+    delay=0.5,
+):
+    text = str(text).strip()
+    if not text:
+        raise ValueError("Text message cannot be empty.")
+    if not destinations:
+        raise ValueError("Select at least one destination.")
+
+    default_send_as = str(config.get("send_as", "auto")).strip().lower()
+    errors = validate_destinations(destinations, default_send_as)
+    if errors:
+        raise RuntimeError("Invalid text destination configuration:\n- " + "\n- ".join(errors))
+
+    required_modes = {
+        message_send_as(destination, default_send_as)
+        for destination in destinations
+        if message_send_as(destination, default_send_as) in {"app", "user"}
+    }
+    tokens = get_tokens(config, Path(config_path), required_modes)
+    sent_log_path = Path(sent_log_path)
+    batch_id = f"{time.strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(4)}"
+
+    for destination in destinations:
+        send_as = message_send_as(destination, default_send_as)
+        name = destination.get("name", "<unnamed>")
+        if send_as == "webhook":
+            send_text_with_retry(
+                destination["webhook"],
+                text,
+                destination.get("secret", ""),
+            )
+        else:
+            data = send_text_to_receiver_with_retry(
+                destination["receive_id_type"],
+                destination["receive_id"],
+                text,
+                tokens[send_as],
+                config,
+            )
+            message_id = get_message_id(data)
+            if message_id:
+                append_sent_log(
+                    sent_log_path,
+                    {
+                        "action": "send",
+                        "send_as": send_as,
+                        "message_id": message_id,
+                        "name": name,
+                        "receive_id_type": destination["receive_id_type"],
+                        "receive_id": destination["receive_id"],
+                        "batch_id": batch_id,
+                        "msg_type": "text",
+                    },
+                )
+            else:
+                print(f"Warning: sent text to {name} but response had no message_id.")
+        print(f"Sent text: {name}")
+        if delay:
+            time.sleep(delay)
+
+    return len(destinations)
 
 
 def main():

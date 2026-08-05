@@ -8,10 +8,13 @@ import threading
 import traceback
 
 from app_workflows import (
+    configured_text_destinations,
     open_wecom_config,
+    route_group_destination_indexes,
     run_auto_dispatch_manifest,
     run_dc_export,
     run_report,
+    run_text_message,
     run_tracking,
     run_wecom_download,
 )
@@ -23,14 +26,21 @@ gdi32 = ctypes.windll.gdi32
 comdlg32 = ctypes.windll.comdlg32
 
 WM_DESTROY = 0x0002
+WM_PAINT = 0x000F
+WM_ERASEBKGND = 0x0014
 WM_SIZE = 0x0005
 WM_COMMAND = 0x0111
+WM_DRAWITEM = 0x002B
+WM_CTLCOLOREDIT = 0x0133
+WM_CTLCOLORLISTBOX = 0x0134
+WM_CTLCOLORSTATIC = 0x0138
 WM_SETFONT = 0x0030
 WM_APP_UPDATE = 0x8001
 SW_SHOW = 5
 WS_OVERLAPPEDWINDOW = 0x00CF0000
 WS_VISIBLE = 0x10000000
 WS_CHILD = 0x40000000
+WS_CLIPCHILDREN = 0x02000000
 WS_TABSTOP = 0x00010000
 WS_BORDER = 0x00800000
 WS_VSCROLL = 0x00200000
@@ -40,15 +50,56 @@ ES_AUTOHSCROLL = 0x0080
 ES_WANTRETURN = 0x1000
 ES_READONLY = 0x0800
 BS_PUSHBUTTON = 0x00000000
+BS_OWNERDRAW = 0x0000000B
+LBS_MULTIPLESEL = 0x0008
+LBS_NOINTEGRALHEIGHT = 0x0100
 SS_LEFT = 0x00000000
 EM_SETSEL = 0x00B1
 EM_REPLACESEL = 0x00C2
+EM_SETCUEBANNER = 0x1501
+LB_ADDSTRING = 0x0180
+LB_RESETCONTENT = 0x0184
+LB_SETSEL = 0x0185
+LB_GETSELCOUNT = 0x0190
+LB_GETSELITEMS = 0x0191
+EN_CHANGE = 0x0300
+LBN_SELCHANGE = 1
 OFN_EXPLORER = 0x00080000
 OFN_FILEMUSTEXIST = 0x00001000
 OFN_PATHMUSTEXIST = 0x00000800
 OFN_ALLOWMULTISELECT = 0x00000200
 COLOR_WINDOW = 5
 IDC_ARROW = 32512
+ODT_BUTTON = 4
+ODS_SELECTED = 0x0001
+ODS_DISABLED = 0x0004
+PS_SOLID = 0
+TRANSPARENT = 1
+OPAQUE = 2
+DT_CENTER = 0x00000001
+DT_VCENTER = 0x00000004
+DT_SINGLELINE = 0x00000020
+DT_END_ELLIPSIS = 0x00008000
+
+
+def rgb(red, green, blue):
+    return red | (green << 8) | (blue << 16)
+
+
+COLOR_APP_BACKGROUND = rgb(246, 248, 252)
+COLOR_CARD = rgb(255, 255, 255)
+COLOR_CARD_BORDER = rgb(226, 232, 240)
+COLOR_HEADER = rgb(15, 23, 42)
+COLOR_HEADER_MUTED = rgb(191, 219, 254)
+COLOR_TEXT = rgb(30, 41, 59)
+COLOR_TEXT_MUTED = rgb(100, 116, 139)
+COLOR_PRIMARY = rgb(37, 99, 235)
+COLOR_PRIMARY_HOVER = rgb(29, 78, 216)
+COLOR_SECONDARY = rgb(239, 246, 255)
+COLOR_SECONDARY_HOVER = rgb(219, 234, 254)
+COLOR_SECONDARY_TEXT = rgb(30, 64, 175)
+COLOR_GHOST = rgb(255, 255, 255)
+COLOR_GHOST_HOVER = rgb(248, 250, 252)
 
 ID_TRACKING = 1001
 ID_REPORT = 1002
@@ -58,6 +109,11 @@ ID_DC_EXPORT = 1005
 ID_DISPATCH_ROUTE = 1006
 ID_DISPATCH_DRIVER = 1007
 ID_AUTO_DISPATCH = 1008
+ID_TEXT_MESSAGE = 1009
+ID_TEXT_TARGETS = 1010
+ID_SEND_TEXT = 1011
+ID_TEXT_TARGET_SEARCH = 1012
+ID_AUTO_SELECT_ROUTE_GROUPS = 1013
 
 
 WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_longlong, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
@@ -106,6 +162,31 @@ class OPENFILENAMEW(ctypes.Structure):
     ]
 
 
+class PAINTSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("hdc", wintypes.HDC),
+        ("fErase", wintypes.BOOL),
+        ("rcPaint", wintypes.RECT),
+        ("fRestore", wintypes.BOOL),
+        ("fIncUpdate", wintypes.BOOL),
+        ("rgbReserved", ctypes.c_byte * 32),
+    ]
+
+
+class DRAWITEMSTRUCT(ctypes.Structure):
+    _fields_ = [
+        ("CtlType", wintypes.UINT),
+        ("CtlID", wintypes.UINT),
+        ("itemID", wintypes.UINT),
+        ("itemAction", wintypes.UINT),
+        ("itemState", wintypes.UINT),
+        ("hwndItem", wintypes.HWND),
+        ("hDC", wintypes.HDC),
+        ("rcItem", wintypes.RECT),
+        ("itemData", ctypes.c_size_t),
+    ]
+
+
 def _configure_win32_api():
     lresult = ctypes.c_ssize_t
     kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
@@ -139,6 +220,18 @@ def _configure_win32_api():
     user32.ShowWindow.restype = wintypes.BOOL
     user32.UpdateWindow.argtypes = [wintypes.HWND]
     user32.UpdateWindow.restype = wintypes.BOOL
+    user32.BeginPaint.argtypes = [wintypes.HWND, ctypes.POINTER(PAINTSTRUCT)]
+    user32.BeginPaint.restype = wintypes.HDC
+    user32.EndPaint.argtypes = [wintypes.HWND, ctypes.POINTER(PAINTSTRUCT)]
+    user32.EndPaint.restype = wintypes.BOOL
+    user32.FillRect.argtypes = [wintypes.HDC, ctypes.POINTER(wintypes.RECT), wintypes.HBRUSH]
+    user32.FillRect.restype = ctypes.c_int
+    user32.InvalidateRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT), wintypes.BOOL]
+    user32.InvalidateRect.restype = wintypes.BOOL
+    user32.GetClientRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+    user32.GetClientRect.restype = wintypes.BOOL
+    user32.DrawTextW.argtypes = [wintypes.HDC, wintypes.LPCWSTR, ctypes.c_int, ctypes.POINTER(wintypes.RECT), wintypes.UINT]
+    user32.DrawTextW.restype = ctypes.c_int
     user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
     user32.GetMessageW.restype = wintypes.BOOL
     user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
@@ -168,6 +261,22 @@ def _configure_win32_api():
     user32.PostQuitMessage.restype = None
 
     gdi32.CreateFontW.restype = wintypes.HANDLE
+    gdi32.CreateSolidBrush.argtypes = [wintypes.COLORREF]
+    gdi32.CreateSolidBrush.restype = wintypes.HBRUSH
+    gdi32.CreatePen.argtypes = [ctypes.c_int, ctypes.c_int, wintypes.COLORREF]
+    gdi32.CreatePen.restype = wintypes.HPEN
+    gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+    gdi32.SelectObject.restype = wintypes.HGDIOBJ
+    gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+    gdi32.DeleteObject.restype = wintypes.BOOL
+    gdi32.RoundRect.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+    gdi32.RoundRect.restype = wintypes.BOOL
+    gdi32.SetTextColor.argtypes = [wintypes.HDC, wintypes.COLORREF]
+    gdi32.SetTextColor.restype = wintypes.COLORREF
+    gdi32.SetBkColor.argtypes = [wintypes.HDC, wintypes.COLORREF]
+    gdi32.SetBkColor.restype = wintypes.COLORREF
+    gdi32.SetBkMode.argtypes = [wintypes.HDC, ctypes.c_int]
+    gdi32.SetBkMode.restype = ctypes.c_int
     comdlg32.GetOpenFileNameW.argtypes = [ctypes.POINTER(OPENFILENAMEW)]
     comdlg32.GetOpenFileNameW.restype = wintypes.BOOL
 
@@ -197,6 +306,18 @@ class IMileWin32App:
         self.subtitle = None
         self.tracking_button = None
         self.report_button = None
+        self.text_label = None
+        self.text_message_edit = None
+        self.text_targets_label = None
+        self.text_target_search_edit = None
+        self.text_targets_list = None
+        self.text_selection_status = None
+        self.text_auto_select_button = None
+        self.text_send_button = None
+        self.text_destinations = []
+        self.text_visible_destination_indexes = []
+        self.selected_text_destination_indexes = set()
+        self.text_destination_error = None
         self.wecom_button = None
         self.wecom_settings_button = None
         self.dc_export_button = None
@@ -209,9 +330,18 @@ class IMileWin32App:
         self.log = None
         self.busy = False
         self.events = queue.Queue()
+        self.button_variants = {}
+        self.cue_buffers = []
+        self.theme_rects = {}
+        self.app_background_brush = gdi32.CreateSolidBrush(COLOR_APP_BACKGROUND)
+        self.card_brush = gdi32.CreateSolidBrush(COLOR_CARD)
+        self.header_brush = gdi32.CreateSolidBrush(COLOR_HEADER)
         self.wndproc = WNDPROC(self._wndproc)
         self.font = gdi32.CreateFontW(
-            -18, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Microsoft YaHei UI"
+            -16, 0, 0, 0, 400, 0, 0, 0, 1, 0, 0, 5, 0, "Microsoft YaHei UI"
+        )
+        self.button_font = gdi32.CreateFontW(
+            -16, 0, 0, 0, 600, 0, 0, 0, 1, 0, 0, 5, 0, "Microsoft YaHei UI"
         )
         self.title_font = gdi32.CreateFontW(
             -30, 0, 0, 0, 700, 0, 0, 0, 1, 0, 0, 5, 0, "Microsoft YaHei UI"
@@ -224,7 +354,7 @@ class IMileWin32App:
         wc.lpfnWndProc = self.wndproc
         wc.hInstance = instance
         wc.hCursor = user32.LoadCursorW(None, IDC_ARROW)
-        wc.hbrBackground = ctypes.cast(COLOR_WINDOW + 1, wintypes.HBRUSH)
+        wc.hbrBackground = None
         wc.lpszClassName = class_name
         if not user32.RegisterClassW(ctypes.byref(wc)) and kernel32.GetLastError() != 1410:
             raise ctypes.WinError()
@@ -233,11 +363,11 @@ class IMileWin32App:
             0,
             class_name,
             "iMile 报表助手",
-            WS_OVERLAPPEDWINDOW,
+            WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             100,
-            80,
+            20,
             920,
-            840,
+            1020,
             None,
             None,
             instance,
@@ -253,9 +383,15 @@ class IMileWin32App:
             user32.TranslateMessage(ctypes.byref(message))
             user32.DispatchMessageW(ctypes.byref(message))
 
-    def _create_control(self, cls, text, style, x, y, width, height, control_id=0):
+    def _create_control(self, cls, text, style, x, y, width, height, control_id=0, variant="secondary"):
+        is_button = cls == "BUTTON"
+        if is_button:
+            style = (style & ~0x000F) | BS_OWNERDRAW
+        ex_style = 0x00000200 if cls in {"EDIT", "LISTBOX"} else 0
+        if cls in {"EDIT", "LISTBOX"}:
+            style &= ~WS_BORDER
         handle = user32.CreateWindowExW(
-            0,
+            ex_style,
             cls,
             text,
             WS_CHILD | WS_VISIBLE | style,
@@ -268,14 +404,197 @@ class IMileWin32App:
             kernel32.GetModuleHandleW(None),
             None,
         )
-        user32.SendMessageW(handle, WM_SETFONT, self.font, True)
+        user32.SendMessageW(handle, WM_SETFONT, self.button_font if is_button else self.font, True)
+        if is_button:
+            self.button_variants[int(handle)] = variant
         return handle
+
+    def _set_cue_banner(self, handle, text):
+        buffer = ctypes.create_unicode_buffer(text)
+        self.cue_buffers.append(buffer)
+        user32.SendMessageW(handle, EM_SETCUEBANNER, True, ctypes.addressof(buffer))
 
     def _get_control_text(self, handle):
         length = user32.GetWindowTextLengthW(handle)
         buffer = ctypes.create_unicode_buffer(length + 1)
         user32.GetWindowTextW(handle, buffer, len(buffer))
         return buffer.value.strip()
+
+    def _selected_text_destination_indexes(self):
+        self._sync_selected_text_destinations()
+        return sorted(self.selected_text_destination_indexes)
+
+    def _sync_selected_text_destinations(self):
+        if not self.text_targets_list:
+            return
+        count = user32.SendMessageW(self.text_targets_list, LB_GETSELCOUNT, 0, 0)
+        selected_rows = []
+        if count > 0:
+            selected = (ctypes.c_int * count)()
+            user32.SendMessageW(
+                self.text_targets_list,
+                LB_GETSELITEMS,
+                count,
+                ctypes.addressof(selected),
+            )
+            selected_rows = list(selected)
+
+        selected_indexes = {
+            self.text_visible_destination_indexes[row]
+            for row in selected_rows
+            if row < len(self.text_visible_destination_indexes)
+        }
+        self.selected_text_destination_indexes.difference_update(self.text_visible_destination_indexes)
+        self.selected_text_destination_indexes.update(selected_indexes)
+        self._update_text_selection_status()
+
+    def _update_text_selection_status(self):
+        if self.text_selection_status:
+            user32.SetWindowTextW(
+                self.text_selection_status,
+                f"已选 {len(self.selected_text_destination_indexes)} 个群",
+            )
+
+    def _refresh_text_destination_list(self, sync_selection=True):
+        if sync_selection:
+            self._sync_selected_text_destinations()
+        if not self.text_targets_list:
+            return
+
+        query = self._get_control_text(self.text_target_search_edit).casefold()
+        user32.SendMessageW(self.text_targets_list, LB_RESETCONTENT, 0, 0)
+        self.text_visible_destination_indexes = []
+        for index, destination in enumerate(self.text_destinations):
+            name = str(destination.get("name", "未命名群"))
+            if query and query not in name.casefold():
+                continue
+            row = len(self.text_visible_destination_indexes)
+            self.text_visible_destination_indexes.append(index)
+            label = ctypes.create_unicode_buffer(name)
+            user32.SendMessageW(self.text_targets_list, LB_ADDSTRING, 0, ctypes.addressof(label))
+            if index in self.selected_text_destination_indexes:
+                user32.SendMessageW(self.text_targets_list, LB_SETSEL, True, row)
+        self._update_text_selection_status()
+
+    def _auto_select_route_groups(self):
+        text = self._get_control_text(self.text_message_edit)
+        requested_codes, matched_indexes = route_group_destination_indexes(
+            self.text_destinations,
+            text,
+        )
+        if not requested_codes:
+            user32.MessageBoxW(
+                self.hwnd,
+                "请先在文字内容中填写线路名，例如：HMT - TRG。",
+                "未识别到线路名",
+                0x30,
+            )
+            return
+        if not matched_indexes:
+            user32.MessageBoxW(
+                self.hwnd,
+                f"已识别线路：{'、'.join(requested_codes)}，但没有找到对应群。",
+                "未找到对应群",
+                0x30,
+            )
+            return
+
+        self.selected_text_destination_indexes = set(matched_indexes)
+        self._refresh_text_destination_list(sync_selection=False)
+        names = [self.text_destinations[index].get("name", "未命名群") for index in matched_indexes]
+        user32.MessageBoxW(
+            self.hwnd,
+            f"已按线路 {'、'.join(requested_codes)} 自动选中：\n" + "\n".join(names),
+            "已自动选择群",
+            0x40,
+        )
+
+    @staticmethod
+    def _rounded_rect(hdc, bounds, fill_color, border_color=COLOR_CARD_BORDER, radius=14):
+        left, top, right, bottom = bounds
+        brush = gdi32.CreateSolidBrush(fill_color)
+        pen = gdi32.CreatePen(PS_SOLID, 1, border_color)
+        old_brush = gdi32.SelectObject(hdc, brush)
+        old_pen = gdi32.SelectObject(hdc, pen)
+        gdi32.RoundRect(hdc, left, top, right, bottom, radius, radius)
+        gdi32.SelectObject(hdc, old_brush)
+        gdi32.SelectObject(hdc, old_pen)
+        gdi32.DeleteObject(brush)
+        gdi32.DeleteObject(pen)
+
+    def _draw_theme(self, hdc):
+        client = wintypes.RECT()
+        user32.GetClientRect(self.hwnd, ctypes.byref(client))
+        user32.FillRect(hdc, ctypes.byref(client), self.app_background_brush)
+        header = wintypes.RECT(client.left, client.top, client.right, min(client.bottom, 108))
+        user32.FillRect(hdc, ctypes.byref(header), self.header_brush)
+        for bounds in self.theme_rects.values():
+            self._rounded_rect(hdc, bounds, COLOR_CARD)
+
+    def _draw_button(self, draw_item):
+        variant = self.button_variants.get(int(draw_item.hwndItem), "secondary")
+        disabled = bool(draw_item.itemState & ODS_DISABLED)
+        pressed = bool(draw_item.itemState & ODS_SELECTED)
+        if disabled:
+            fill_color = rgb(226, 232, 240)
+            border_color = fill_color
+            text_color = rgb(148, 163, 184)
+        elif variant == "primary":
+            fill_color = COLOR_PRIMARY_HOVER if pressed else COLOR_PRIMARY
+            border_color = fill_color
+            text_color = COLOR_CARD
+        elif variant == "ghost":
+            fill_color = COLOR_GHOST_HOVER if pressed else COLOR_GHOST
+            border_color = COLOR_CARD_BORDER
+            text_color = COLOR_TEXT_MUTED
+        else:
+            fill_color = COLOR_SECONDARY_HOVER if pressed else COLOR_SECONDARY
+            border_color = rgb(191, 219, 254)
+            text_color = COLOR_SECONDARY_TEXT
+
+        rect = draw_item.rcItem
+        offset = 1 if pressed else 0
+        self._rounded_rect(
+            draw_item.hDC,
+            (rect.left, rect.top + offset, rect.right, rect.bottom + offset),
+            fill_color,
+            border_color,
+            radius=12,
+        )
+        gdi32.SetBkMode(draw_item.hDC, TRANSPARENT)
+        gdi32.SetTextColor(draw_item.hDC, text_color)
+        text = self._get_control_text(draw_item.hwndItem)
+        text_rect = wintypes.RECT(rect.left + 12, rect.top + offset, rect.right - 12, rect.bottom + offset)
+        user32.DrawTextW(
+            draw_item.hDC,
+            text,
+            len(text),
+            ctypes.byref(text_rect),
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
+        )
+
+    def _control_color(self, message, hdc, control):
+        control = int(control)
+        if message == WM_CTLCOLORSTATIC:
+            header_controls = {int(item) for item in (self.title, self.subtitle) if item}
+            muted_controls = {int(item) for item in (self.text_selection_status, self.status) if item}
+            if control in header_controls:
+                gdi32.SetBkMode(hdc, OPAQUE)
+                gdi32.SetBkColor(hdc, COLOR_HEADER)
+                gdi32.SetTextColor(hdc, COLOR_CARD if control == int(self.title) else COLOR_HEADER_MUTED)
+                return self.header_brush
+            gdi32.SetBkMode(hdc, OPAQUE)
+            gdi32.SetBkColor(hdc, COLOR_CARD)
+            if control in muted_controls:
+                gdi32.SetTextColor(hdc, COLOR_TEXT_MUTED)
+            else:
+                gdi32.SetTextColor(hdc, COLOR_TEXT)
+            return self.card_brush
+
+        gdi32.SetBkMode(hdc, TRANSPARENT)
+        gdi32.SetBkColor(hdc, COLOR_CARD)
+        gdi32.SetTextColor(hdc, COLOR_TEXT)
+        return self.card_brush
 
     def _move_control(self, handle, x, y, width, height):
         if handle:
@@ -292,19 +611,33 @@ class IMileWin32App:
         if not self.log or client_width <= 0 or client_height <= 0:
             return
 
-        left = 36
-        right = 36
-        content_width = max(520, client_width - left - right)
+        content_width = min(1360, max(520, client_width - 64))
+        left = max(32, (client_width - content_width) // 2)
         row_gap = 18
         settings_width = 144
         first_width = max(260, content_width - settings_width - row_gap)
         half_gap = 32
         half_width = max(230, (content_width - half_gap) // 2)
 
-        manifest_y = 382
+        text_label_y = 356
+        text_y = 382
+        text_height = 150
+        target_width = min(560, max(320, int(content_width * 0.36)))
+        text_gap = 20
+        text_width = max(280, content_width - target_width - text_gap)
+        target_x = left + text_width + text_gap
+        target_search_height = 30
+        target_list_y = text_y + target_search_height + 8
+        target_list_height = text_height - target_search_height - 8
+        target_status_y = target_list_y + target_list_height + 5
+        target_auto_y = target_status_y + 24
+        text_send_y = target_auto_y + 42
+
+        dispatch_label_y = text_send_y + 66
+        manifest_y = dispatch_label_y + 26
         available_height = max(180, client_height - manifest_y - 36)
         target_manifest_height = max(128, int(available_height * 0.42))
-        max_manifest_height = max(80, client_height - 601)
+        max_manifest_height = max(80, client_height - manifest_y - 219)
         manifest_height = min(target_manifest_height, max_manifest_height)
         manifest_width = max(300, content_width - 222)
         action_x = left + manifest_width + 20
@@ -315,7 +648,15 @@ class IMileWin32App:
         log_y = log_label_y + 30
         log_height = max(40, client_height - log_y - 36)
 
-        self._move_control(self.title, 34, 22, content_width, 44)
+        self.theme_rects = {
+            "workflow": (left - 16, 112, left + content_width + 16, 350),
+            "message": (left - 16, text_label_y - 14, left + content_width + 16, text_send_y + 62),
+            "dispatch": (left - 16, dispatch_label_y - 14, left + content_width + 16, manifest_y + manifest_height + 16),
+            "activity": (left - 16, status_y - 12, left + content_width + 16, log_y + log_height + 16),
+        }
+        user32.InvalidateRect(self.hwnd, None, True)
+
+        self._move_control(self.title, left, 22, content_width, 44)
         self._move_control(self.subtitle, left, 68, content_width, 28)
         self._move_control(self.wecom_button, left, 120, first_width, 62)
         self._move_control(
@@ -334,7 +675,15 @@ class IMileWin32App:
             62,
         )
         self._move_control(self.report_button, left, 280, content_width, 62)
-        self._move_control(self.dispatch_label, left, 356, content_width, 24)
+        self._move_control(self.text_label, left, text_label_y, text_width, 24)
+        self._move_control(self.text_targets_label, target_x, text_label_y, target_width, 24)
+        self._move_control(self.text_message_edit, left, text_y, text_width, text_height)
+        self._move_control(self.text_target_search_edit, target_x, text_y, target_width, target_search_height)
+        self._move_control(self.text_targets_list, target_x, target_list_y, target_width, target_list_height)
+        self._move_control(self.text_selection_status, target_x, target_status_y, target_width, 20)
+        self._move_control(self.text_auto_select_button, target_x, target_auto_y, target_width, 34)
+        self._move_control(self.text_send_button, target_x, text_send_y, target_width, 48)
+        self._move_control(self.dispatch_label, left, dispatch_label_y, content_width, 24)
         self._move_control(
             self.dispatch_route_edit,
             left,
@@ -348,13 +697,30 @@ class IMileWin32App:
         self._move_control(self.log, left, log_y, content_width, log_height)
 
     def _wndproc(self, hwnd, msg, wparam, lparam):
+        if msg == WM_ERASEBKGND:
+            return 1
+        if msg == WM_PAINT:
+            paint = PAINTSTRUCT()
+            hdc = user32.BeginPaint(hwnd, ctypes.byref(paint))
+            try:
+                self._draw_theme(hdc)
+            finally:
+                user32.EndPaint(hwnd, ctypes.byref(paint))
+            return 0
+        if msg == WM_DRAWITEM:
+            draw_item = DRAWITEMSTRUCT.from_address(int(lparam))
+            if draw_item.CtlType == ODT_BUTTON and int(draw_item.hwndItem) in self.button_variants:
+                self._draw_button(draw_item)
+                return 1
+        if msg in {WM_CTLCOLORSTATIC, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX}:
+            return self._control_color(msg, wparam, lparam)
         if msg == 1:  # WM_CREATE
             self.hwnd = hwnd
             self.title = self._create_control("STATIC", "iMile 报表助手", SS_LEFT, 34, 22, 500, 44)
             user32.SendMessageW(self.title, WM_SETFONT, self.title_font, True)
             self.subtitle = self._create_control(
                 "STATIC",
-                "WISEWAY 日常收件 · Auslink 偶发顺友 · 提取运单号 · 下载中心运单查询",
+                "每日运营工作台 · 收件、查询、报表与群发",
                 SS_LEFT,
                 36,
                 68,
@@ -363,57 +729,149 @@ class IMileWin32App:
             )
             self.wecom_button = self._create_control(
                 "BUTTON",
-                "① 自动收件  |  WISEWAY 主群（Auslink 备用）",
+                "自动收件",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 36,
                 120,
                 650,
                 62,
                 ID_WECOM_DOWNLOAD,
+                variant="primary",
             )
             self.wecom_settings_button = self._create_control(
                 "BUTTON",
-                "收件设置",
+                "设置",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 704,
                 120,
                 144,
                 62,
                 ID_WECOM_SETTINGS,
+                variant="ghost",
             )
             self.tracking_button = self._create_control(
                 "BUTTON",
-                "② 手动提取运单号",
+                "提取运单号",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 36,
                 200,
                 390,
                 62,
                 ID_TRACKING,
+                variant="secondary",
             )
             self.dc_export_button = self._create_control(
                 "BUTTON",
-                "③ 重试中心运单导出",
+                "中心运单导出",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 458,
                 200,
                 390,
                 62,
                 ID_DC_EXPORT,
+                variant="secondary",
             )
             self.report_button = self._create_control(
                 "BUTTON",
-                "④ 发送报表  |  生成并由机器人发送",
+                "生成并发送日报",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 36,
                 280,
                 812,
                 62,
                 ID_REPORT,
+                variant="primary",
+            )
+            self.text_label = self._create_control(
+                "STATIC",
+                "群发消息",
+                SS_LEFT,
+                36,
+                356,
+                560,
+                24,
+            )
+            self.text_targets_label = self._create_control(
+                "STATIC",
+                "接收群",
+                SS_LEFT,
+                616,
+                356,
+                232,
+                24,
+            )
+            self.text_message_edit = self._create_control(
+                "EDIT",
+                "",
+                WS_BORDER | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN,
+                36,
+                382,
+                560,
+                116,
+                ID_TEXT_MESSAGE,
+            )
+            self._set_cue_banner(self.text_message_edit, "输入消息内容，例如：HMT - TRG 今日到件更新")
+            self.text_target_search_edit = self._create_control(
+                "EDIT",
+                "",
+                WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL,
+                616,
+                382,
+                232,
+                30,
+                ID_TEXT_TARGET_SEARCH,
+            )
+            self._set_cue_banner(self.text_target_search_edit, "搜索群名")
+            self.text_targets_list = self._create_control(
+                "LISTBOX",
+                "",
+                WS_BORDER | WS_TABSTOP | WS_VSCROLL | LBS_MULTIPLESEL | LBS_NOINTEGRALHEIGHT,
+                616,
+                420,
+                232,
+                78,
+                ID_TEXT_TARGETS,
+            )
+            self.text_selection_status = self._create_control(
+                "STATIC",
+                "已选 0 个群",
+                SS_LEFT,
+                616,
+                538,
+                232,
+                20,
+            )
+            try:
+                self.text_destinations = configured_text_destinations()
+            except Exception as exc:
+                self.text_destination_error = str(exc)
+                self.text_destinations = []
+            self._refresh_text_destination_list()
+            self.text_auto_select_button = self._create_control(
+                "BUTTON",
+                "按线路自动选群",
+                BS_PUSHBUTTON | WS_TABSTOP,
+                616,
+                562,
+                232,
+                34,
+                ID_AUTO_SELECT_ROUTE_GROUPS,
+                variant="ghost",
+            )
+            self.text_send_button = self._create_control(
+                "BUTTON",
+                "发送消息",
+                BS_PUSHBUTTON | WS_TABSTOP,
+                616,
+                604,
+                232,
+                48,
+                ID_SEND_TEXT,
+                variant="primary",
             )
             self.dispatch_label = self._create_control(
                 "STATIC",
-                "分单清单（每行：线路… 司机；301所有表示含全部单字母后缀）",
+                "自动分单",
                 SS_LEFT,
                 36,
                 356,
@@ -430,15 +888,17 @@ class IMileWin32App:
                 128,
                 ID_DISPATCH_ROUTE,
             )
+            self._set_cue_banner(self.dispatch_route_edit, "每行输入：线路 - 司机；例如 301所有 - 张三")
             self.dispatch_button = self._create_control(
                 "BUTTON",
-                "⑤ 自动合并并选司机",
+                "自动合并并选司机",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 646,
                 415,
                 202,
                 52,
                 ID_AUTO_DISPATCH,
+                variant="primary",
             )
             self.status = self._create_control(
                 "STATIC",
@@ -467,7 +927,12 @@ class IMileWin32App:
             return 0
         if msg == WM_COMMAND:
             command_id = int(wparam) & 0xFFFF
-            if command_id == ID_WECOM_DOWNLOAD and not self.busy:
+            notification = (int(wparam) >> 16) & 0xFFFF
+            if command_id == ID_TEXT_TARGET_SEARCH and notification == EN_CHANGE and not self.busy:
+                self._refresh_text_destination_list()
+            elif command_id == ID_TEXT_TARGETS and notification == LBN_SELCHANGE:
+                self._sync_selected_text_destinations()
+            elif command_id == ID_WECOM_DOWNLOAD and not self.busy:
                 self._start("正在识别当前群并下载对应附件…", run_wecom_download)
             elif command_id == ID_WECOM_SETTINGS and not self.busy:
                 try:
@@ -485,6 +950,56 @@ class IMileWin32App:
                 files = self._file_dialog(False, "选择中心运单查询 Excel", "Excel 文件\0*.xlsx\0所有文件\0*.*\0")
                 if files:
                     self._start("正在生成并发送报表…", run_report, files[0])
+            elif command_id == ID_AUTO_SELECT_ROUTE_GROUPS and not self.busy:
+                if self.text_destination_error:
+                    user32.MessageBoxW(
+                        self.hwnd,
+                        self.text_destination_error,
+                        "无法读取飞书群配置",
+                        0x10,
+                    )
+                else:
+                    self._auto_select_route_groups()
+            elif command_id == ID_SEND_TEXT and not self.busy:
+                text = self._get_control_text(self.text_message_edit)
+                selected_indexes = self._selected_text_destination_indexes()
+                if self.text_destination_error:
+                    user32.MessageBoxW(
+                        self.hwnd,
+                        self.text_destination_error,
+                        "无法读取飞书群配置",
+                        0x10,
+                    )
+                elif not text:
+                    user32.MessageBoxW(self.hwnd, "请先输入要发送的文字。", "无法发送", 0x30)
+                elif not selected_indexes:
+                    user32.MessageBoxW(self.hwnd, "请至少选择一个接收群。", "无法发送", 0x30)
+                else:
+                    names = [
+                        self.text_destinations[index].get("name", "未命名群")
+                        for index in selected_indexes
+                    ]
+                    preview = "\n".join(f"• {name}" for name in names[:10])
+                    if len(names) > 10:
+                        preview += f"\n• 以及另外 {len(names) - 10} 个群"
+                    confirmation = (
+                        f"同一条文字将发送到 {len(names)} 个群：\n\n"
+                        f"{preview}\n\n"
+                        "发送后会立即出现在这些群中。是否继续？"
+                    )
+                    result = user32.MessageBoxW(
+                        self.hwnd,
+                        confirmation,
+                        "确认群发文字",
+                        0x00000004 | 0x00000030 | 0x00000100,
+                    )
+                    if result == 6:
+                        self._start(
+                            f"正在向 {len(names)} 个群发送文字…",
+                            run_text_message,
+                            text,
+                            selected_indexes,
+                        )
             elif command_id == ID_AUTO_DISPATCH and not self.busy:
                 manifest = self._get_control_text(self.dispatch_route_edit)
                 if not manifest:
@@ -554,6 +1069,11 @@ class IMileWin32App:
             self.tracking_button,
             self.dc_export_button,
             self.report_button,
+            self.text_message_edit,
+            self.text_target_search_edit,
+            self.text_targets_list,
+            self.text_auto_select_button,
+            self.text_send_button,
             self.dispatch_route_edit,
             self.dispatch_driver_edit,
             self.dispatch_button,
