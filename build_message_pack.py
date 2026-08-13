@@ -6,6 +6,8 @@ import pandas as pd
 from openpyxl import load_workbook
 from PIL import Image, ImageDraw, ImageFont
 
+from report_config import BOARD_3L_CAPACITY, BOARD_5L_CAPACITY, SUPPLIER_ROUTE_GROUPS
+
 
 REPORT_FILES = sorted(
     [
@@ -151,7 +153,17 @@ def rect(draw, coords, **kwargs):
     draw.rectangle(scaled_box(coords), **kwargs)
 
 
-def render_table_image(path, title, headers, rows, widths, title_fill=BLUE, header_fill=LIGHT_BLUE):
+def render_table_image(
+    path,
+    title,
+    headers,
+    rows,
+    widths,
+    title_fill=BLUE,
+    header_fill=LIGHT_BLUE,
+    fit_body_columns=(),
+    hide_total_label=False,
+):
     row_h = 36
     title_h = 58
     header_h = 64
@@ -178,13 +190,26 @@ def render_table_image(path, title, headers, rows, widths, title_fill=BLUE, head
         is_total = clean_text(row[0]) in {"总计", "Total"}
         x = margin
         for idx, (value, col_w) in enumerate(zip(row, widths)):
+            display_value = "" if is_total and hide_total_label and idx == 0 else value
             fill = TOTAL_BLUE if is_total else WHITE
             rect(draw, [x, y, x + col_w, y + row_h], fill=fill, outline=BLACK, width=line_width())
             font = FONT_BODY_BOLD if is_total else FONT_BODY
-            if idx == 0:
-                draw_centered_text(draw, (x, y, x + col_w, y + row_h), value, font)
+            if not is_total and idx in fit_body_columns:
+                draw_centered_fit_text(
+                    draw,
+                    (x, y, x + col_w, y + row_h),
+                    display_value,
+                    18,
+                    min_size=12,
+                    padding=6,
+                )
             else:
-                draw_centered_text(draw, (x, y, x + col_w, y + row_h), value, font)
+                draw_centered_text(
+                    draw,
+                    (x, y, x + col_w, y + row_h),
+                    display_value,
+                    font,
+                )
             x += col_w
         y += row_h
 
@@ -192,18 +217,78 @@ def render_table_image(path, title, headers, rows, widths, title_fill=BLUE, head
     image.save(path)
 
 
-def render_supplier_image(path, supplier, group):
-    rows = [
-        [row.route_code, row.quantity, supplier]
+def supplier_display_rows(supplier, group):
+    records = [
+        {
+            "route_code": clean_route_code(row.route_code),
+            "quantity": clean_number(row.quantity),
+        }
         for row in group.itertuples(index=False)
     ]
-    rows.append(["总计", int(group["quantity"].sum()), supplier])
+    route_positions = {}
+    for index, record in enumerate(records):
+        route_code = record["route_code"]
+        if route_code in route_positions:
+            raise ValueError(f"Duplicate route code for {supplier}: {route_code}")
+        route_positions[route_code] = index
+
+    configured_groups = []
+    consumed_routes = set()
+    for raw_members in SUPPLIER_ROUTE_GROUPS.get(supplier, []):
+        members = tuple(clean_route_code(route_code) for route_code in raw_members)
+        if len(members) < 2 or any(not member for member in members):
+            raise ValueError(f"Invalid supplier route group for {supplier}: {raw_members}")
+        if len(set(members)) != len(members):
+            raise ValueError(f"Duplicate member in supplier route group for {supplier}: {members}")
+        overlap = consumed_routes.intersection(members)
+        if overlap:
+            raise ValueError(
+                f"Overlapping supplier route groups for {supplier}: {sorted(overlap)}"
+            )
+        missing = [member for member in members if member not in route_positions]
+        if missing:
+            raise ValueError(
+                f"Missing configured routes for {supplier}: {', '.join(missing)}"
+            )
+        consumed_routes.update(members)
+        configured_groups.append((min(route_positions[member] for member in members), members))
+
+    group_by_first_position = {position: members for position, members in configured_groups}
+    rows = []
+    for index, record in enumerate(records):
+        route_code = record["route_code"]
+        members = group_by_first_position.get(index)
+        if members:
+            quantities = [records[route_positions[member]]["quantity"] for member in members]
+            rows.append(
+                [
+                    " / ".join(members),
+                    " / ".join(format_display(value) for value in quantities)
+                    + f" ({format_display(sum(quantities))})",
+                    supplier,
+                ]
+            )
+        elif route_code not in consumed_routes:
+            rows.append([route_code, record["quantity"], supplier])
+
+    displayed_total = sum(record["quantity"] for record in records)
+    return rows, displayed_total
+
+
+def render_supplier_image(path, supplier, group):
+    rows, displayed_total = supplier_display_rows(supplier, group)
+    rows.append(["Total", int(group["quantity"].sum()), supplier])
+    if displayed_total != group["quantity"].sum():
+        raise ValueError(f"Supplier display total mismatch for {supplier}")
+    has_grouped_routes = bool(SUPPLIER_ROUTE_GROUPS.get(supplier))
     render_table_image(
         path=path,
         title=f"{REPORT_DATE}奥克兰分单 - {supplier}",
         headers=["路由码\nroute code", "到件货量（预估）\nVolume of goods", "供应商\nsupplier"],
         rows=rows,
-        widths=[170, 260, 260],
+        widths=[300, 340, 260] if has_grouped_routes else [170, 260, 260],
+        fit_body_columns=(0, 1) if has_grouped_routes else (),
+        hide_total_label=False,
     )
 
 
@@ -262,6 +347,8 @@ def render_non_auckland_overview(
     overview,
     board_3l,
     board_5l,
+    base_3l,
+    base_5l,
     aliexpress_count,
     sunyou_count,
     total_count,
@@ -346,11 +433,11 @@ def render_non_auckland_overview(
 
     side_x = main_w + gap
     board_3l_img = board_3l.copy()
-    board_3l_img["base"] = 135
+    board_3l_img["base"] = base_3l
     draw_board_table(side_x, 60, "3L预测板数", board_3l_img)
 
     board_5l_img = board_5l.copy()
-    board_5l_img["base"] = 350
+    board_5l_img["base"] = base_5l
     draw_board_table(side_x, 460, "5L预测板数", board_5l_img)
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -402,6 +489,9 @@ def build_non_auckland_messages():
     board_5l["station"] = board_5l["station"].map(clean_text)
     board_5l["boards"] = board_5l["boards"].map(clean_number)
 
+    base_3l = clean_number(df.iloc[1, 7]) or BOARD_3L_CAPACITY
+    base_5l = clean_number(df.iloc[12, 7]) or BOARD_5L_CAPACITY
+
     aliexpress_count = clean_number(df.iloc[13, 0])
     sunyou_count = clean_number(df.iloc[13, 2])
     province_total = overview.loc[overview["station"].eq("总计"), "arrival_volume"]
@@ -422,6 +512,8 @@ def build_non_auckland_messages():
         overview,
         board_3l,
         board_5l,
+        base_3l,
+        base_5l,
         aliexpress_count,
         sunyou_count,
         total_count,

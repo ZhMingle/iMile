@@ -71,6 +71,83 @@ class UpdateReportDataTests(unittest.TestCase):
     def test_clean_route_code_preserves_meaningful_decimal_or_text_codes(self):
         self.assertEqual(update_report_data.clean_route_code("201.5"), "201.5")
         self.assertEqual(update_report_data.clean_route_code("201A"), "201A")
+        self.assertEqual(update_report_data.clean_route_code("501 C"), "501C")
+
+    def test_404a_supplier_is_overridden_to_feng(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "奥克兰"
+        worksheet.cell(3, 1).value = "404 A"
+        worksheet.cell(3, 7).value = "PANDA"
+        worksheet.cell(4, 1).value = "总计"
+
+        update_report_data.update_auckland_sheet(
+            workbook,
+            Counter({"404A": 10}),
+        )
+
+        self.assertEqual(worksheet.cell(3, 7).value, "Feng")
+
+    def test_501c_supplier_is_overridden_to_empire_courier(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "奥克兰"
+        worksheet.cell(3, 1).value = "501 C"
+        worksheet.cell(3, 7).value = "PANDA"
+        worksheet.cell(4, 1).value = "总计"
+
+        update_report_data.update_auckland_sheet(
+            workbook,
+            Counter({"501C": 4}),
+        )
+
+        self.assertEqual(worksheet.cell(3, 3).value, 4)
+        self.assertEqual(worksheet.cell(3, 7).value, "EMPIRE COURIER")
+
+    def test_3l_board_forecast_uses_200_piece_capacity(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        arrivals = {
+            "HMT": 1570,
+            "TRG": 1190,
+            "WLTV2": 1574,
+            "NPL": 494,
+            "PMN": 679,
+            "TPO": 201,
+            "RTR": 440,
+            "WGR": 417,
+            "HST": 345,
+        }
+        for row, (station, arrival) in enumerate(arrivals.items(), start=3):
+            worksheet.cell(row, 1).value = station
+            worksheet.cell(row, 3).value = arrival
+        worksheet.cell(12, 1).value = "总计"
+        worksheet.cell(2, 8).value = 135
+        worksheet.cell(13, 8).value = 350
+
+        update_report_data.write_board_forecast_values(worksheet)
+
+        self.assertEqual(worksheet.cell(2, 8).value, 200)
+        self.assertEqual(
+            [worksheet.cell(row, 8).value for row in range(3, 11)],
+            ["HMT", "TRG", "RTR", "TPO", "NPL", "HST", "PMN", "WLTV2"],
+        )
+        self.assertEqual(
+            [worksheet.cell(row, 9).value for row in range(3, 11)],
+            [7.85, 5.95, 2.2, 1.0, 2.47, 1.73, 3.4, 7.87],
+        )
+        self.assertEqual(worksheet.cell(11, 9).value, 32.47)
+        self.assertEqual(
+            [worksheet.cell(row, 8).value for row in range(14, 22)],
+            ["HMT", "TRG", "RTR", "TPO", "NPL", "HST", "PMN", "WLTV2"],
+        )
+        self.assertEqual(worksheet.cell(22, 9).value, 18.56)
+
+    def test_non_auckland_arrivals_follow_dispatch_distance_order(self):
+        self.assertEqual(
+            update_report_data.NON_AUCKLAND_STATIONS,
+            ["HMT", "TRG", "RTR", "TPO", "NPL", "HST", "PMN", "WLTV2", "WGR"],
+        )
 
     def test_manual_english_export_headers_are_canonicalized(self):
         with tempfile.TemporaryDirectory() as temp_dir:

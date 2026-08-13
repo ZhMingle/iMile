@@ -10,6 +10,8 @@ from copy import copy
 import pandas as pd
 from openpyxl import load_workbook
 
+from report_config import BOARD_3L_CAPACITY, BOARD_5L_CAPACITY
+
 
 SOURCE_PATTERN = "*中心运单查询*.xlsx"
 TEMPLATE_PATTERN = "当日数据统计*.xlsx"
@@ -46,7 +48,8 @@ MERCHANT_CODES = {
 CAINIAO_MERCHANT_CODE = MERCHANT_CODES["CAINIAO"]
 SUNYOU_MERCHANT_CODE = MERCHANT_CODES["SUNYOU"]
 
-NON_AUCKLAND_STATIONS = ["HMT", "TRG", "WLTV2", "NPL", "PMN", "TPO", "RTR", "WGR", "HST"]
+NON_AUCKLAND_STATIONS = ["HMT", "TRG", "RTR", "TPO", "NPL", "HST", "PMN", "WLTV2", "WGR"]
+BOARD_FORECAST_STATIONS = ["HMT", "TRG", "RTR", "TPO", "NPL", "HST", "PMN", "WLTV2"]
 STATION_ALIASES = {
     "WLTV2": ["WLTV2", "WLT", "AKL-DC"],
     "PMN": ["PMN", "PMNV2", "Palmerston NorthV2"],
@@ -58,6 +61,8 @@ STATION_DISPLAY_ALIASES = {
     "RTR": " Rotorua",
 }
 AUCKLAND_ROUTE_SUPPLIERS = {
+    "404A": "Feng",
+    "501C": "EMPIRE COURIER",
     "406": "Feng",
     "601": "Good Day Removals Ltd",
 }
@@ -590,8 +595,12 @@ def copy_board_row_style(ws, source_row, target_row):
 
 
 def write_board_forecast_values(ws):
-    base_3l = ws.cell(2, 8).value or 135
-    base_5l = ws.cell(13, 8).value or 350
+    # 3L forecasts now use 200 pieces per board.  Persist the assumption in
+    # the report so both the workbook and the generated image show the same
+    # capacity and use it for every station calculation.
+    ws.cell(2, 8).value = BOARD_3L_CAPACITY
+    base_3l = BOARD_3L_CAPACITY
+    base_5l = ws.cell(13, 8).value or BOARD_5L_CAPACITY
 
     total_row = find_total_row(ws, column=1)
     arrival_by_station = {
@@ -600,24 +609,12 @@ def write_board_forecast_values(ws):
     }
 
     rows_3l = {
-        3: "RTR",
-        4: "HMT",
-        5: "TRG",
-        6: "HST",
-        7: "NPL",
-        8: "TPO",
-        9: "PMN",
-        10: "WLTV2",
+        row: station
+        for row, station in enumerate(BOARD_FORECAST_STATIONS, start=3)
     }
     rows_5l = {
-        14: "RTR",
-        15: "HMT",
-        16: "TRG",
-        17: "HST",
-        18: "NPL",
-        19: "TPO",
-        20: "PMN",
-        21: "WLTV2",
+        row: station
+        for row, station in enumerate(BOARD_FORECAST_STATIONS, start=14)
     }
 
     copy_board_row_style(ws, 10, 11)
@@ -630,7 +627,10 @@ def write_board_forecast_values(ws):
         ws.cell(row, 9).value = round_excel(arrival_by_station.get(station, 0) / base_3l)
 
     ws.cell(11, 8).value = "总计"
-    ws.cell(11, 9).value = sum(ws.cell(row, 9).value or 0 for row in [4, 5, 6, 7, 8, 9])
+    ws.cell(11, 9).value = sum(
+        ws.cell(row, 9).value or 0
+        for row in rows_3l
+    )
     ws.cell(11, 9).value = round_excel(ws.cell(11, 9).value)
 
     for row, station in rows_5l.items():
@@ -638,7 +638,10 @@ def write_board_forecast_values(ws):
         ws.cell(row, 9).value = round_excel(arrival_by_station.get(station, 0) / base_5l)
 
     ws.cell(22, 8).value = "总计"
-    ws.cell(22, 9).value = sum(ws.cell(row, 9).value or 0 for row in [15, 16, 17, 18, 19, 20])
+    ws.cell(22, 9).value = sum(
+        ws.cell(row, 9).value or 0
+        for row in rows_5l
+    )
     ws.cell(22, 9).value = round_excel(ws.cell(22, 9).value)
 
 
