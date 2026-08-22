@@ -37,15 +37,10 @@ echo Extracting tracking numbers from the input folder...
 set "EXIT_CODE=%ERRORLEVEL%"
 echo.
 if not "%EXIT_CODE%"=="0" goto failed
-echo Done: %~dp0output\query_list.txt
 goto finish
 
 :failed
 echo Extraction failed. See the error above.
 
 :finish
-if /i "%~1"=="--no-pause" goto exit_script
-pause
-
-:exit_script
 exit /b %EXIT_CODE%
