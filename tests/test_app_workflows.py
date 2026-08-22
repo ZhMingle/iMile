@@ -1,4 +1,5 @@
 from datetime import date, datetime, time
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -8,6 +9,69 @@ from unittest import mock
 import app_workflows
 import run_daily_report
 import update_report_data
+
+
+class BotMessageConfigurationTests(unittest.TestCase):
+    @staticmethod
+    def _write_config(folder, messages, default_send_as="auto"):
+        config_path = Path(folder) / "lark_config.json"
+        config_path.write_text(
+            json.dumps(
+                {
+                    "app_id": "app-id",
+                    "app_secret": "app-secret",
+                    "send_as": default_send_as,
+                    "messages": messages,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return config_path
+
+    def test_filters_each_mode_and_resolves_auto_messages(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = self._write_config(
+                temp_dir,
+                [
+                    {
+                        "name": "Auto webhook",
+                        "send_as": "auto",
+                        "webhook": "https://example.test/hook",
+                    },
+                    {
+                        "name": "Auto app",
+                        "receive_id_type": "chat_id",
+                        "receive_id": "oc_app",
+                    },
+                    {
+                        "name": "Explicit user",
+                        "send_as": "user",
+                        "receive_id_type": "open_id",
+                        "receive_id": "ou_user",
+                    },
+                ],
+            )
+
+            webhook_messages = app_workflows.configured_bot_messages(config_path, "webhook")
+            app_messages = app_workflows.configured_bot_messages(config_path, "app")
+            user_messages = app_workflows.configured_bot_messages(config_path, "user")
+
+        self.assertEqual([message["name"] for message in webhook_messages], ["Auto webhook"])
+        self.assertEqual([message["name"] for message in app_messages], ["Auto app"])
+        self.assertEqual([message["name"] for message in user_messages], ["Explicit user"])
+
+    def test_validates_the_target_required_by_the_selected_mode(self):
+        cases = [
+            ("webhook", {"name": "Missing hook", "send_as": "webhook"}, "Webhook 地址"),
+            ("app", {"name": "Missing app receiver", "send_as": "app"}, "接收 ID"),
+            ("user", {"name": "Missing user receiver", "send_as": "user"}, "接收 ID"),
+        ]
+        for send_as, message, expected_error in cases:
+            with self.subTest(send_as=send_as), tempfile.TemporaryDirectory() as temp_dir:
+                config_path = self._write_config(temp_dir, [message])
+
+                with self.assertRaisesRegex(RuntimeError, expected_error):
+                    app_workflows.configured_bot_messages(config_path, send_as)
 
 
 class CenterWaybillFreshnessTests(unittest.TestCase):
@@ -70,7 +134,7 @@ class CenterWaybillFreshnessTests(unittest.TestCase):
             path = self._file_with_modified_date(temp_dir, date(2000, 1, 1))
             with mock.patch.object(app_workflows, "configured_bot_messages") as configured:
                 with self.assertRaisesRegex(RuntimeError, "为防止误发，操作已停止"):
-                    app_workflows.run_report(path)
+                    app_workflows.run_report(path, send_as="webhook")
 
         configured.assert_not_called()
 
@@ -84,6 +148,8 @@ class CenterWaybillFreshnessTests(unittest.TestCase):
             update_module = mock.Mock()
             build_module = mock.Mock()
             sender_module = mock.Mock()
+            sender_argv = []
+            sender_module.main.side_effect = lambda: sender_argv.append(app_workflows.sys.argv[:])
 
             def import_module(name):
                 return {
@@ -94,17 +160,31 @@ class CenterWaybillFreshnessTests(unittest.TestCase):
 
             with (
                 mock.patch.object(app_workflows, "APP_DIR", app_dir),
-                mock.patch.object(app_workflows, "configured_bot_messages", return_value=[{}]),
+                mock.patch.object(
+                    app_workflows,
+                    "configured_bot_messages",
+                    return_value=[{}],
+                ) as configured,
                 mock.patch.object(app_workflows.importlib, "import_module", side_effect=import_module),
                 mock.patch.object(app_workflows.importlib, "reload", side_effect=lambda module: module),
             ):
-                app_workflows.run_report(source, allow_old_source=True)
+                result = app_workflows.run_report(
+                    source,
+                    allow_old_source=True,
+                    send_as="webhook",
+                )
 
             target = app_dir / "中心运单查询.xlsx"
             self.assertEqual(target.read_bytes(), b"selected workbook")
             update_module.main.assert_called_once_with(target, allow_old_source=True)
             build_module.main.assert_called_once_with()
             sender_module.main.assert_called_once_with()
+            configured.assert_called_once_with(send_as="webhook")
+            self.assertEqual(
+                sender_argv,
+                [["send_lark_images.py", "--send", "--send-as", "webhook"]],
+            )
+            self.assertIn("Webhook 机器人", result)
 
     def test_update_report_guard_can_only_be_bypassed_explicitly(self):
         with tempfile.TemporaryDirectory() as temp_dir:

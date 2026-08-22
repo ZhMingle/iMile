@@ -737,7 +737,7 @@ class IMileWin32App:
             user32.SendMessageW(self.title, WM_SETFONT, self.title_font, True)
             self.subtitle = self._create_control(
                 "STATIC",
-                "每日运营工作台 · 收件、查询、报表与群发",
+                "每日运营工作台 · 便携运行，无需命令行",
                 SS_LEFT,
                 36,
                 68,
@@ -768,7 +768,7 @@ class IMileWin32App:
             )
             self.tracking_button = self._create_control(
                 "BUTTON",
-                "提取运单号",
+                "提取运单号并复制",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 36,
                 200,
@@ -790,7 +790,7 @@ class IMileWin32App:
             )
             self.report_button = self._create_control(
                 "BUTTON",
-                "生成并发送日报",
+                "Webhook 一键日报",
                 BS_PUSHBUTTON | WS_TABSTOP,
                 36,
                 280,
@@ -958,9 +958,13 @@ class IMileWin32App:
                 except Exception as exc:
                     user32.MessageBoxW(self.hwnd, str(exc), "无法打开配置", 0x10)
             elif command_id == ID_TRACKING and not self.busy:
-                files = self._file_dialog(True, "选择需要提取运单号的 Excel 文件", "Excel 文件\0*.xls;*.xlsx\0所有文件\0*.*\0")
+                files = self._file_dialog(
+                    True,
+                    "选择需要提取运单号的 Excel 或 CSV 文件",
+                    "Excel / CSV 文件\0*.xls;*.xlsx;*.csv\0所有文件\0*.*\0",
+                )
                 if files:
-                    self._start("正在提取运单号…", run_tracking, files)
+                    self._start("正在提取运单号并复制到剪贴板…", run_tracking, files)
             elif command_id == ID_DC_EXPORT and not self.busy:
                 self._start("正在查询并下载中心运单查询…", run_dc_export)
             elif command_id == ID_REPORT and not self.busy:
@@ -983,7 +987,7 @@ class IMileWin32App:
                             self.hwnd,
                             f"{freshness_warning}\n\n"
                             "请确认是不是忘记下载或替换今天的文件。\n\n"
-                            "选择“是”：仍用这个文件生成并发送日报\n"
+                            "选择“是”：仍用这个文件生成并通过 Webhook 发送日报\n"
                             "选择“否”：取消发送，返回更新文件\n\n"
                             "是否仍要继续？",
                             "中心运单查询文件可能未更新",
@@ -997,10 +1001,11 @@ class IMileWin32App:
                             return 0
                         allow_old_source = True
                     self._start(
-                        "正在生成并发送报表…",
+                        "正在生成并通过 Webhook 发送日报…",
                         run_report,
                         files[0],
                         allow_old_source,
+                        "webhook",
                     )
             elif command_id == ID_AUTO_SELECT_ROUTE_GROUPS and not self.busy:
                 if self.text_destination_error:

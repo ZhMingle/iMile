@@ -54,10 +54,9 @@ if errorlevel 1 (
 
 copy /Y "当日数据统计_20260603_233359_公式版.xlsx" "dist\iMileReportAssistant\" >nul
 copy /Y "lark_bot_config.example.json" "dist\iMileReportAssistant\" >nul
-if exist "lark_config.json" copy /Y "lark_config.json" "dist\iMileReportAssistant\" >nul
 copy /Y "wecom_download_config.example.json" "dist\iMileReportAssistant\" >nul
-if exist "wecom_download_config.json" copy /Y "wecom_download_config.json" "dist\iMileReportAssistant\" >nul
 copy /Y "BOT_SETUP.md" "dist\iMileReportAssistant\" >nul
+if not exist "dist\iMileReportAssistant\input" mkdir "dist\iMileReportAssistant\input"
 if not exist "dist\iMileReportAssistant\output" mkdir "dist\iMileReportAssistant\output"
 
 echo.

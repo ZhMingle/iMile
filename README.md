@@ -68,6 +68,27 @@ The redirect URL must be added in the Feishu Developer Console. The app also nee
 
 项目适合每天重复使用，减少人工统计、截图和逐群复制粘贴图片的工作量。
 
+### 零配置内部便携版（Windows）
+
+Windows 助手把原来的两个命令行流程放到了窗口中：
+
+- “提取运单号并复制”对应 `getTrakingNum.bat`，可直接多选 `.xls`、`.xlsx` 或 `.csv` 文件。
+- “Webhook 一键日报”对应 `daily_webhook.bat`，选择当天的中心运单查询文件后会更新工作簿、生成图片并发送到已配置的 Webhook 目标。
+
+生成内部便携 ZIP：
+
+```powershell
+.\build_portable_release.bat
+```
+
+产物为 `dist/iMileReportAssistant-portable.zip`。接收者需要完整解压 ZIP 后再双击
+`iMileReportAssistant.exe`；不能只复制 EXE，且无需安装 Python 或 Microsoft Excel。
+
+便携构建会从本机 `lark_config.json` 生成受限的 Webhook 共享配置，只保留日报和文字发送所需
+的应用凭据、Webhook 目标和图片映射。个人授权令牌、个人账号目标、历史输出、发送记录及企业微信
+本机配置都不会进入发布包。因为包内仍含有共享的机器人发送凭据，只能交给公司内部可信同事，
+不可公开上传或转发。自动收件和 DC 自动化仍需要接收者在自己的电脑上完成客户端登录或本机设置。
+
 ### 企业微信自动收件（Windows）
 
 Windows 版「iMile 报表助手」顶部提供“自动收件”按钮。日常主流程使用 `iMile x WISEWAY`；

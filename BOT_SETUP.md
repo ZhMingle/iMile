@@ -1,12 +1,21 @@
-# Lark 机器人配置
+# Lark / 飞书机器人配置
 
 1. 在飞书开放平台创建企业自建应用，并启用机器人能力。
 2. 为应用开通发送消息和上传图片所需权限，并发布应用版本。
 3. 将机器人加入需要接收报表的群。
-4. 复制 `lark_bot_config.example.json` 为 `lark_config.json`。
-5. 填写 `app_id`、`app_secret`，以及每张图片对应群的 `chat_id`。
+4. 复制 `lark_config.example.json` 为 `lark_config.json`。
+5. 填写 `app_id`、`app_secret`，以及每张图片对应群的 Webhook；便携版窗口中的
+   “Webhook 一键日报”只发送 `send_as: "webhook"` 的图片任务。
 
-应用仅发送 `send_as: "app"` 的消息，不使用个人账号授权。
+零配置内部便携版运行：
+
+```powershell
+.\build_portable_release.bat
+```
+
+将生成的 `dist\iMileReportAssistant-portable.zip` 完整发送给内部可信同事。发布配置会移除
+个人授权令牌、`send_as: "user"` 目标、历史输出和本机企业微信配置，但仍包含共享机器人凭据，
+因此不可公开分发。接收者完整解压后双击 `iMileReportAssistant.exe`，无需安装 Python 或 Excel。
 
 ## 企业微信自动收件
 

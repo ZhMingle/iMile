@@ -23,7 +23,23 @@ def load_lark_config(config_path=None):
     return config_path, config
 
 
-def configured_bot_messages(config_path=None):
+def _resolved_bot_send_as(message, default_send_as):
+    send_as = str(message.get("send_as") or default_send_as).strip().lower()
+    if send_as == "auto":
+        webhook = str(message.get("webhook") or "").strip()
+        return "webhook" if webhook.startswith("https://") else "app"
+    return send_as
+
+
+def _normalize_bot_send_as(send_as):
+    send_as = str(send_as).strip().lower()
+    if send_as not in {"app", "webhook", "user"}:
+        raise RuntimeError("发送模式必须是 app、webhook 或 user。")
+    return send_as
+
+
+def configured_bot_messages(config_path=None, send_as="app"):
+    send_as = _normalize_bot_send_as(send_as)
     config_path = Path(config_path or APP_DIR / "lark_config.json")
     if not config_path.exists():
         raise RuntimeError("找不到 lark_config.json，请先完成机器人配置。")
@@ -35,20 +51,29 @@ def configured_bot_messages(config_path=None):
     messages = [
         message
         for message in config.get("messages", [])
-        if str(message.get("send_as") or default_send_as).strip().lower() == "app"
+        if _resolved_bot_send_as(message, default_send_as) == send_as
     ]
     if not messages:
-        raise RuntimeError("lark_config.json 中没有 send_as=app 的机器人消息配置。")
+        raise RuntimeError(f"lark_config.json 中没有 send_as={send_as} 的机器人消息配置。")
 
-    incomplete = [
-        message.get("name", "未命名图片")
-        for message in messages
-        if not message.get("receive_id_type") or not message.get("receive_id")
-    ]
+    if send_as == "webhook":
+        incomplete = [
+            message.get("name", "未命名图片")
+            for message in messages
+            if not str(message.get("webhook") or "").strip().startswith("https://")
+        ]
+        missing_target = "有效的 Webhook 地址"
+    else:
+        incomplete = [
+            message.get("name", "未命名图片")
+            for message in messages
+            if not message.get("receive_id_type") or not message.get("receive_id")
+        ]
+        missing_target = "接收 ID"
     if incomplete:
         names = "、".join(incomplete[:5])
         suffix = " 等" if len(incomplete) > 5 else ""
-        raise RuntimeError(f"以下机器人消息缺少群 ID：{names}{suffix}")
+        raise RuntimeError(f"以下 {send_as} 机器人消息缺少{missing_target}：{names}{suffix}")
     return messages
 
 
@@ -223,7 +248,7 @@ def open_wecom_config():
     return module.CONFIG_PATH
 
 
-def run_report(source_file, allow_old_source=False):
+def run_report(source_file, allow_old_source=False, send_as="app"):
     freshness_warning = center_waybill_file_freshness_warning(source_file)
     if freshness_warning and not allow_old_source:
         raise RuntimeError(
@@ -231,8 +256,9 @@ def run_report(source_file, allow_old_source=False):
             "为防止误发，操作已停止。请重新选择今天更新的文件。"
         )
 
-    messages = configured_bot_messages()
-    print(f"Robot destinations configured: {len(messages)}")
+    send_as = _normalize_bot_send_as(send_as)
+    messages = configured_bot_messages(send_as=send_as)
+    print(f"Robot destinations configured for {send_as}: {len(messages)}")
 
     target = APP_DIR / "中心运单查询.xlsx"
     source_file = Path(source_file)
@@ -249,11 +275,16 @@ def run_report(source_file, allow_old_source=False):
     sender = importlib.import_module("send_lark_images")
     original_argv = sys.argv[:]
     try:
-        sys.argv = ["send_lark_images.py", "--send", "--send-as", "app"]
+        sys.argv = ["send_lark_images.py", "--send", "--send-as", send_as]
         sender.main()
     except SystemExit as exc:
         if exc.code not in (None, 0):
             raise RuntimeError("机器人发送失败，请查看运行记录。") from exc
     finally:
         sys.argv = original_argv
-    return f"报表已生成，并发送到 {len(messages)} 个机器人目标。"
+    mode_label = {
+        "app": "应用机器人",
+        "webhook": "Webhook 机器人",
+        "user": "用户身份",
+    }[send_as]
+    return f"报表已生成，并通过{mode_label}发送到 {len(messages)} 个目标。"
