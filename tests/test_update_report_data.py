@@ -88,12 +88,12 @@ class UpdateReportDataTests(unittest.TestCase):
 
         self.assertEqual(worksheet.cell(3, 7).value, "Feng")
 
-    def test_501c_supplier_is_overridden_to_empire_courier(self):
+    def test_501c_supplier_is_overridden_to_panda(self):
         workbook = Workbook()
         worksheet = workbook.active
         worksheet.title = "奥克兰"
         worksheet.cell(3, 1).value = "501 C"
-        worksheet.cell(3, 7).value = "PANDA"
+        worksheet.cell(3, 7).value = "EMPIRE COURIER"
         worksheet.cell(4, 1).value = "总计"
 
         update_report_data.update_auckland_sheet(
@@ -102,7 +102,7 @@ class UpdateReportDataTests(unittest.TestCase):
         )
 
         self.assertEqual(worksheet.cell(3, 3).value, 4)
-        self.assertEqual(worksheet.cell(3, 7).value, "EMPIRE COURIER")
+        self.assertEqual(worksheet.cell(3, 7).value, "PANDA")
 
     def test_3l_board_forecast_uses_200_piece_capacity(self):
         workbook = Workbook()

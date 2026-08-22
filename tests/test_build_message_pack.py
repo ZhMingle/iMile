@@ -21,12 +21,13 @@ class BuildMessagePackTests(unittest.TestCase):
         )
         self.assertEqual(total, 90)
 
-    def test_panda_groups_only_501b_and_502a(self):
+    def test_panda_keeps_routes_separate(self):
         group = pd.DataFrame(
             [
                 ["402", 35, "PANDA"],
                 ["403", 35, "PANDA"],
                 ["501B", 118, "PANDA"],
+                ["501C", 4, "PANDA"],
                 ["502A", 36, "PANDA"],
             ],
             columns=["route_code", "quantity", "supplier"],
@@ -39,12 +40,14 @@ class BuildMessagePackTests(unittest.TestCase):
             [
                 ["402", 35, "PANDA"],
                 ["403", 35, "PANDA"],
-                ["501B / 502A", "118 / 36 (154)", "PANDA"],
+                ["501B", 118, "PANDA"],
+                ["501C", 4, "PANDA"],
+                ["502A", 36, "PANDA"],
             ],
         )
-        self.assertEqual(total, 224)
+        self.assertEqual(total, 228)
 
-    def test_fast_donkey_groups_and_preserves_zero_group(self):
+    def test_fast_donkey_keeps_309_and_309a_separate_and_preserves_zero_group(self):
         group = pd.DataFrame(
             [
                 ["211", 30, "Fast donkey"], ["211A", 27, "Fast donkey"],
@@ -68,7 +71,8 @@ class BuildMessagePackTests(unittest.TestCase):
             [
                 ["211 / 211A", "30 / 27 (57)", "Fast donkey"],
                 ["306", 66, "Fast donkey"],
-                ["309 / 309A", "27 / 35 (62)", "Fast donkey"],
+                ["309", 27, "Fast donkey"],
+                ["309A", 35, "Fast donkey"],
                 ["310", 11, "Fast donkey"],
                 ["311", 17, "Fast donkey"],
                 ["312", 18, "Fast donkey"],
@@ -203,7 +207,6 @@ class BuildMessagePackTests(unittest.TestCase):
                 ["204 S", 6, "EMPIRE COURIER"],
                 ["501", 11, "EMPIRE COURIER"],
                 ["501 A", 9, "EMPIRE COURIER"],
-                ["501 C", 4, "EMPIRE COURIER"],
                 ["501 D", 24, "EMPIRE COURIER"],
                 ["502", 9, "EMPIRE COURIER"],
                 ["502 B", 11, "EMPIRE COURIER"],
@@ -227,8 +230,8 @@ class BuildMessagePackTests(unittest.TestCase):
                 ["107 / 108", "32 / 25 (57)", "EMPIRE COURIER"],
                 ["204 / 204S", "15 / 6 (21)", "EMPIRE COURIER"],
                 [
-                    "501 / 501A / 501C / 501D",
-                    "11 / 9 / 4 / 24 (48)",
+                    "501 / 501A / 501D",
+                    "11 / 9 / 24 (44)",
                     "EMPIRE COURIER",
                 ],
                 ["502 / 502B / 502C", "9 / 11 / 35 (55)", "EMPIRE COURIER"],
@@ -239,7 +242,7 @@ class BuildMessagePackTests(unittest.TestCase):
                 ],
             ],
         )
-        self.assertEqual(total, 382)
+        self.assertEqual(total, 378)
 
     def test_empire_group_does_not_pull_routes_from_panda(self):
         empire = pd.DataFrame(
@@ -256,7 +259,6 @@ class BuildMessagePackTests(unittest.TestCase):
                 ["204S", 6, "EMPIRE COURIER"],
                 ["501", 11, "EMPIRE COURIER"],
                 ["501A", 9, "EMPIRE COURIER"],
-                ["501C", 4, "EMPIRE COURIER"],
                 ["501D", 24, "EMPIRE COURIER"],
                 ["502", 9, "EMPIRE COURIER"],
                 ["502B", 11, "EMPIRE COURIER"],
@@ -270,15 +272,28 @@ class BuildMessagePackTests(unittest.TestCase):
             columns=["route_code", "quantity", "supplier"],
         )
         panda = pd.DataFrame(
-            [["501B", 118, "PANDA"], ["502A", 36, "PANDA"]],
+            [
+                ["501B", 118, "PANDA"],
+                ["501C", 4, "PANDA"],
+                ["502A", 36, "PANDA"],
+            ],
             columns=["route_code", "quantity", "supplier"],
         )
 
         empire_rows, _ = build_message_pack.supplier_display_rows("EMPIRE COURIER", empire)
         panda_rows, _ = build_message_pack.supplier_display_rows("PANDA", panda)
 
-        self.assertNotIn("501B", " ".join(str(value) for row in empire_rows for value in row))
-        self.assertEqual(panda_rows, [["501B / 502A", "118 / 36 (154)", "PANDA"]])
+        empire_text = " ".join(str(value) for row in empire_rows for value in row)
+        self.assertNotIn("501B", empire_text)
+        self.assertNotIn("501C", empire_text)
+        self.assertEqual(
+            panda_rows,
+            [
+                ["501B", 118, "PANDA"],
+                ["501C", 4, "PANDA"],
+                ["502A", 36, "PANDA"],
+            ],
+        )
 
     def test_supplier_render_uses_wide_fit_columns_and_preserves_grand_total(self):
         group = pd.DataFrame(
@@ -295,7 +310,6 @@ class BuildMessagePackTests(unittest.TestCase):
                 ["204S", 6, "EMPIRE COURIER"],
                 ["501", 11, "EMPIRE COURIER"],
                 ["501A", 9, "EMPIRE COURIER"],
-                ["501C", 4, "EMPIRE COURIER"],
                 ["501D", 24, "EMPIRE COURIER"],
                 ["502", 9, "EMPIRE COURIER"],
                 ["502B", 11, "EMPIRE COURIER"],
@@ -320,7 +334,7 @@ class BuildMessagePackTests(unittest.TestCase):
         self.assertEqual(kwargs["widths"], [300, 340, 260])
         self.assertEqual(kwargs["fit_body_columns"], (0, 1))
         self.assertFalse(kwargs["hide_total_label"])
-        self.assertEqual(kwargs["rows"][-1], ["Total", 382, "EMPIRE COURIER"])
+        self.assertEqual(kwargs["rows"][-1], ["Total", 378, "EMPIRE COURIER"])
 
     def test_ungrouped_supplier_keeps_original_layout(self):
         group = pd.DataFrame(

@@ -33,6 +33,127 @@ class SendLarkTextTests(unittest.TestCase):
         self.assertEqual(codes, ["HST"])
         self.assertEqual(indexes, [0])
 
+    def test_shared_route_names_select_each_real_group_once(self):
+        destinations = [
+            {"name": "TRG & RTR 各线路预测"},
+            {"name": "NPL & HST 各线路预测"},
+            {"name": "Send as me TRG & RTR 各线路预测"},
+        ]
+        cases = [
+            ("TRG", ["TRG"], [0]),
+            ("RTR", ["RTR"], [0]),
+            ("TRG & RTR", ["TRG", "RTR"], [0]),
+            ("NPL", ["NPL"], [1]),
+            ("HST", ["HST"], [1]),
+            ("NPL & HST", ["NPL", "HST"], [1]),
+            ("TRG / RTR / NPL / HST", ["TRG", "NPL", "HST", "RTR"], [0, 1]),
+        ]
+
+        for text, expected_codes, expected_indexes in cases:
+            with self.subTest(text=text):
+                codes, indexes = app_workflows.route_group_destination_indexes(destinations, text)
+                self.assertEqual(codes, expected_codes)
+                self.assertEqual(indexes, expected_indexes)
+
+    def test_text_destination_groups_merge_only_the_text_list(self):
+        messages = [
+            {
+                "name": "TRG各线路预测",
+                "send_as": "webhook",
+                "webhook": "https://example.test/shared",
+                "secret": "same-secret",
+                "image": "TRG.png",
+            },
+            {
+                "name": "RTR各线路预测",
+                "send_as": "webhook",
+                "webhook": "https://example.test/shared",
+                "secret": "same-secret",
+                "image": "RTR.png",
+            },
+            {
+                "name": "NPL_HST各线路预测",
+                "send_as": "webhook",
+                "webhook": "https://example.test/npl-hst",
+                "image": "NPL_HST.png",
+            },
+        ]
+        groups = [
+            {
+                "name": "TRG & RTR 各线路预测",
+                "members": ["TRG各线路预测", "RTR各线路预测"],
+            },
+            {
+                "name": "NPL & HST 各线路预测",
+                "members": ["NPL_HST各线路预测"],
+            },
+        ]
+
+        grouped = app_workflows.group_text_destinations(messages, groups)
+
+        self.assertEqual(
+            [destination["name"] for destination in grouped],
+            ["TRG & RTR 各线路预测", "NPL & HST 各线路预测"],
+        )
+        self.assertNotIn("image", grouped[0])
+        self.assertEqual([message["image"] for message in messages], ["TRG.png", "RTR.png", "NPL_HST.png"])
+
+    def test_text_destination_group_rejects_different_receivers(self):
+        destinations = [
+            {"name": "TRG", "send_as": "webhook", "webhook": "https://example.test/trg"},
+            {"name": "RTR", "send_as": "webhook", "webhook": "https://example.test/rtr"},
+        ]
+        groups = [{"name": "TRG & RTR", "members": ["TRG", "RTR"]}]
+
+        with self.assertRaisesRegex(RuntimeError, "不是同一个接收群"):
+            app_workflows.group_text_destinations(destinations, groups)
+
+    def test_configured_text_group_does_not_merge_daily_image_tasks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "lark_config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "app_id": "app-id",
+                        "app_secret": "app-secret",
+                        "send_as": "app",
+                        "text_destination_groups": [
+                            {
+                                "name": "TRG & RTR 各线路预测",
+                                "members": ["TRG各线路预测", "RTR各线路预测"],
+                            }
+                        ],
+                        "messages": [
+                            {
+                                "name": "TRG各线路预测",
+                                "receive_id_type": "chat_id",
+                                "receive_id": "shared-chat",
+                                "image": "TRG.png",
+                            },
+                            {
+                                "name": "RTR各线路预测",
+                                "receive_id_type": "chat_id",
+                                "receive_id": "shared-chat",
+                                "image": "RTR.png",
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            text_destinations = app_workflows.configured_text_destinations(config_path)
+            image_messages = app_workflows.configured_bot_messages(config_path)
+
+        self.assertEqual(
+            [destination["name"] for destination in text_destinations],
+            ["TRG & RTR 各线路预测"],
+        )
+        self.assertEqual(
+            [message["image"] for message in image_messages],
+            ["TRG.png", "RTR.png"],
+        )
+
     def test_webhook_text_payload(self):
         with mock.patch.object(
             send_lark_images,
@@ -135,6 +256,38 @@ class SendLarkTextTests(unittest.TestCase):
         selected = send.call_args.args[1]
         self.assertEqual([item["name"] for item in selected], ["A", "C"])
         self.assertEqual(result, "文字消息已发送到 2 个群。")
+
+    def test_workflow_sends_a_shared_destination_only_once(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "lark_config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "text_destinations": [
+                            {
+                                "name": "TRG & RTR 各线路预测",
+                                "send_as": "webhook",
+                                "webhook": "https://example.test/shared",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(
+                send_lark_images,
+                "send_text_to_destinations",
+                return_value=1,
+            ) as send:
+                result = app_workflows.run_text_message(
+                    "TRG & RTR update",
+                    [0, 0],
+                    config_path=config_path,
+                )
+
+        selected = send.call_args.args[1]
+        self.assertEqual([item["name"] for item in selected], ["TRG & RTR 各线路预测"])
+        self.assertEqual(result, "文字消息已发送到 1 个群。")
 
 
 if __name__ == "__main__":

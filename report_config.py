@@ -4,14 +4,14 @@ BOARD_5L_CAPACITY = 350
 
 # Supplier route groups are explicit business rules.  Never infer them from a
 # shared numeric prefix: related route codes can belong to different suppliers
-# or drivers (for example, 501B is not part of EMPIRE COURIER's 501 group).
+# or drivers (for example, 501C belongs to PANDA, not EMPIRE COURIER's 501 group).
 SUPPLIER_ROUTE_GROUPS = {
     "EMPIRE COURIER": [
         ("101", "102", "103"),
         ("104", "105", "106"),
         ("107", "108"),
         ("204", "204S"),
-        ("501", "501A", "501C", "501D"),
+        ("501", "501A", "501D"),
         ("502", "502B", "502C"),
         ("504", "505", "506", "507", "508"),
     ],
@@ -37,12 +37,8 @@ SUPPLIER_ROUTE_GROUPS = {
     ],
     "Fast donkey": [
         ("211", "211A"),
-        ("309", "309A"),
         ("503", "503A", "503B"),
         ("607", "607S"),
         ("609", "609A"),
-    ],
-    "PANDA": [
-        ("501B", "502A"),
     ],
 }

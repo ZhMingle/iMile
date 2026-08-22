@@ -1,3 +1,4 @@
+import argparse
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ import pandas as pd
 from openpyxl import load_workbook
 
 from report_config import BOARD_3L_CAPACITY, BOARD_5L_CAPACITY
+from report_source_freshness import center_waybill_file_freshness_warning
 
 
 SOURCE_PATTERN = "*中心运单查询*.xlsx"
@@ -62,7 +64,7 @@ STATION_DISPLAY_ALIASES = {
 }
 AUCKLAND_ROUTE_SUPPLIERS = {
     "404A": "Feng",
-    "501C": "EMPIRE COURIER",
+    "501C": "PANDA",
     "406": "Feng",
     "601": "Good Day Removals Ltd",
 }
@@ -92,8 +94,26 @@ def is_route_code(value):
     return value == "HST" or any(char.isdigit() for char in value)
 
 
-def load_source_data():
-    source_file, df = find_latest_source_file()
+def load_source_data(source_file=None, allow_old_source=False):
+    if source_file is None:
+        source_file, df = find_latest_source_file()
+    else:
+        source_file = Path(source_file)
+        if not source_file.exists():
+            raise FileNotFoundError(f"Source file not found: {source_file}")
+        df = read_source_xlsx(source_file)
+        missing = [column for column in REQUIRED_COLUMNS if column not in df.columns]
+        if missing:
+            raise ValueError(f"Source file is missing required columns: {source_file}: {missing}")
+
+    freshness_warning = center_waybill_file_freshness_warning(source_file)
+    if freshness_warning and not allow_old_source:
+        raise RuntimeError(
+            f"{freshness_warning}\n\n"
+            "为防止误发，操作已停止。请更新文件后重试；"
+            "如果确实要处理旧文件，请显式使用 --allow-old-source。"
+        )
+
     print(f"Using source file: {source_file}")
     df["路由码"] = df["路由码"].map(clean_route_code)
     df = df[df["运单号"] != ""].drop_duplicates(subset=["运单号"], keep="first")
@@ -645,8 +665,8 @@ def write_board_forecast_values(ws):
     ws.cell(22, 9).value = round_excel(ws.cell(22, 9).value)
 
 
-def main():
-    df = load_source_data()
+def main(source_file=None, allow_old_source=False):
+    df = load_source_data(source_file, allow_old_source=allow_old_source)
 
     station_counts = Counter(df["派件网点简码"])
     route_counts = auckland_route_counts(df)
@@ -722,4 +742,12 @@ def get_auckland_route_codes(wb):
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Update the daily report workbook.")
+    parser.add_argument("--source-file", help="Use this exact center waybill query workbook")
+    parser.add_argument(
+        "--allow-old-source",
+        action="store_true",
+        help="Allow a center waybill query file whose modified date is not today",
+    )
+    args = parser.parse_args()
+    main(args.source_file, allow_old_source=args.allow_old_source)

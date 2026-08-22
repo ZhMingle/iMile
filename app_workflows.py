@@ -6,6 +6,8 @@ import re
 import shutil
 import sys
 
+from report_source_freshness import center_waybill_file_freshness_warning
+
 
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 os.chdir(APP_DIR)
@@ -53,7 +55,90 @@ def configured_bot_messages(config_path=None):
 def configured_text_destinations(config_path=None):
     _, config = load_lark_config(config_path)
     destinations = list(config.get("text_destinations") or config.get("messages") or [])
-    return [destination for destination in destinations if destination.get("name")]
+    destinations = [destination for destination in destinations if destination.get("name")]
+    return group_text_destinations(
+        destinations,
+        config.get("text_destination_groups") or [],
+        config.get("send_as", "auto"),
+    )
+
+
+def _text_destination_identity(destination, default_send_as):
+    send_as = str(destination.get("send_as") or default_send_as).strip().lower()
+    if send_as == "auto":
+        send_as = "webhook" if str(destination.get("webhook", "")).startswith("https://") else "app"
+    if send_as == "webhook":
+        return (
+            send_as,
+            str(destination.get("webhook", "")).strip(),
+            str(destination.get("secret", "")).strip(),
+        )
+    if send_as in {"app", "user"}:
+        return (
+            send_as,
+            str(destination.get("receive_id_type", "")).strip(),
+            str(destination.get("receive_id", "")).strip(),
+        )
+    return None
+
+
+def group_text_destinations(destinations, group_specs, default_send_as="auto"):
+    destinations = list(destinations)
+    replacements = {}
+    consumed_indexes = set()
+
+    for group_spec in group_specs:
+        group_name = str(group_spec.get("name", "")).strip()
+        member_names = [
+            str(name).strip()
+            for name in group_spec.get("members", [])
+            if str(name).strip()
+        ]
+        if not group_name or not member_names:
+            raise RuntimeError("text_destination_groups 中的每一组都必须填写 name 和 members。")
+
+        member_indexes = []
+        missing_names = []
+        for member_name in member_names:
+            matches = [
+                index
+                for index, destination in enumerate(destinations)
+                if str(destination.get("name", "")).strip() == member_name
+            ]
+            if not matches:
+                missing_names.append(member_name)
+            else:
+                member_indexes.extend(matches)
+        if missing_names:
+            raise RuntimeError(
+                f"文字群组“{group_name}”找不到配置项：{'、'.join(missing_names)}"
+            )
+        if any(index in consumed_indexes for index in member_indexes):
+            raise RuntimeError(f"文字群组“{group_name}”与其他群组重复使用了同一个配置项。")
+
+        identities = {
+            _text_destination_identity(destinations[index], default_send_as)
+            for index in member_indexes
+        }
+        if None in identities or len(identities) != 1:
+            raise RuntimeError(
+                f"文字群组“{group_name}”中的配置不是同一个接收群，已停止合并。"
+            )
+
+        first_index = min(member_indexes)
+        grouped_destination = dict(destinations[first_index])
+        grouped_destination["name"] = group_name
+        grouped_destination.pop("image", None)
+        replacements[first_index] = grouped_destination
+        consumed_indexes.update(member_indexes)
+
+    grouped = []
+    for index, destination in enumerate(destinations):
+        if index in replacements:
+            grouped.append(replacements[index])
+        elif index not in consumed_indexes:
+            grouped.append(destination)
+    return grouped
 
 
 def route_group_destination_indexes(destinations, text):
@@ -138,7 +223,14 @@ def open_wecom_config():
     return module.CONFIG_PATH
 
 
-def run_report(source_file):
+def run_report(source_file, allow_old_source=False):
+    freshness_warning = center_waybill_file_freshness_warning(source_file)
+    if freshness_warning and not allow_old_source:
+        raise RuntimeError(
+            f"{freshness_warning}\n\n"
+            "为防止误发，操作已停止。请重新选择今天更新的文件。"
+        )
+
     messages = configured_bot_messages()
     print(f"Robot destinations configured: {len(messages)}")
 
@@ -149,7 +241,7 @@ def run_report(source_file):
         print(f"Selected source: {source_file.name}")
 
     update_module = importlib.import_module("update_report_data")
-    update_module.main()
+    update_module.main(target, allow_old_source=allow_old_source)
 
     build_module = importlib.reload(importlib.import_module("build_message_pack"))
     build_module.main()

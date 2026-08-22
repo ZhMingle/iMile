@@ -8,6 +8,7 @@ import threading
 import traceback
 
 from app_workflows import (
+    center_waybill_file_freshness_warning,
     configured_text_destinations,
     open_wecom_config,
     route_group_destination_indexes,
@@ -366,7 +367,7 @@ class IMileWin32App:
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             100,
             20,
-            920,
+            1080,
             1020,
             None,
             None,
@@ -621,8 +622,8 @@ class IMileWin32App:
 
         text_label_y = 356
         text_y = 382
-        text_height = 150
-        target_width = min(560, max(320, int(content_width * 0.36)))
+        text_height = 230
+        target_width = min(640, max(380, int(content_width * 0.42)))
         text_gap = 20
         text_width = max(280, content_width - target_width - text_gap)
         target_x = left + text_width + text_gap
@@ -630,8 +631,12 @@ class IMileWin32App:
         target_list_y = text_y + target_search_height + 8
         target_list_height = text_height - target_search_height - 8
         target_status_y = target_list_y + target_list_height + 5
-        target_auto_y = target_status_y + 24
-        text_send_y = target_auto_y + 42
+        target_action_y = target_status_y + 26
+        target_action_gap = 10
+        target_auto_width = (target_width - target_action_gap) // 2
+        text_send_x = target_x + target_auto_width + target_action_gap
+        text_send_width = target_width - target_auto_width - target_action_gap
+        text_send_y = target_action_y
 
         dispatch_label_y = text_send_y + 66
         manifest_y = dispatch_label_y + 26
@@ -681,8 +686,20 @@ class IMileWin32App:
         self._move_control(self.text_target_search_edit, target_x, text_y, target_width, target_search_height)
         self._move_control(self.text_targets_list, target_x, target_list_y, target_width, target_list_height)
         self._move_control(self.text_selection_status, target_x, target_status_y, target_width, 20)
-        self._move_control(self.text_auto_select_button, target_x, target_auto_y, target_width, 34)
-        self._move_control(self.text_send_button, target_x, text_send_y, target_width, 48)
+        self._move_control(
+            self.text_auto_select_button,
+            target_x,
+            target_action_y,
+            target_auto_width,
+            48,
+        )
+        self._move_control(
+            self.text_send_button,
+            text_send_x,
+            text_send_y,
+            text_send_width,
+            48,
+        )
         self._move_control(self.dispatch_label, left, dispatch_label_y, content_width, 24)
         self._move_control(
             self.dispatch_route_edit,
@@ -949,7 +966,42 @@ class IMileWin32App:
             elif command_id == ID_REPORT and not self.busy:
                 files = self._file_dialog(False, "选择中心运单查询 Excel", "Excel 文件\0*.xlsx\0所有文件\0*.*\0")
                 if files:
-                    self._start("正在生成并发送报表…", run_report, files[0])
+                    allow_old_source = False
+                    try:
+                        freshness_warning = center_waybill_file_freshness_warning(files[0])
+                    except OSError as exc:
+                        user32.MessageBoxW(
+                            self.hwnd,
+                            f"无法读取所选文件：\n{files[0]}\n\n{exc}",
+                            "无法检查中心运单查询文件",
+                            0x10,
+                        )
+                        user32.SetWindowTextW(self.status, "已取消发送：无法读取所选文件。")
+                        return 0
+                    if freshness_warning:
+                        result = user32.MessageBoxW(
+                            self.hwnd,
+                            f"{freshness_warning}\n\n"
+                            "请确认是不是忘记下载或替换今天的文件。\n\n"
+                            "选择“是”：仍用这个文件生成并发送日报\n"
+                            "选择“否”：取消发送，返回更新文件\n\n"
+                            "是否仍要继续？",
+                            "中心运单查询文件可能未更新",
+                            0x00000004 | 0x00000030 | 0x00000100,
+                        )
+                        if result != 6:
+                            user32.SetWindowTextW(
+                                self.status,
+                                "已取消发送：请重新选择今天更新的中心运单查询文件。",
+                            )
+                            return 0
+                        allow_old_source = True
+                    self._start(
+                        "正在生成并发送报表…",
+                        run_report,
+                        files[0],
+                        allow_old_source,
+                    )
             elif command_id == ID_AUTO_SELECT_ROUTE_GROUPS and not self.busy:
                 if self.text_destination_error:
                     user32.MessageBoxW(
