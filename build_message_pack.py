@@ -39,6 +39,20 @@ YELLOW = "#FFF200"
 TOTAL_BLUE = "#DDEBF7"
 WHITE = "#FFFFFF"
 BLACK = "#000000"
+TEXT_ONLY_ROUTE_CODES = {"HST", "GSB"}
+PROVINCE_STATIONS_BY_MESSAGE = {
+    "WGR": ("WGR",),
+    "HMT": ("HMT",),
+    "PMN": ("PMN", "PMNV2", "PALMERSTON NORTHV2"),
+    "RTR": ("RTR",),
+    "TPO": ("TPO",),
+    "TRG": ("TRG",),
+    "NPL_HST": ("NPL", "HST"),
+    "WLTV2": ("WLTV2",),
+    "NPMV2": ("NPMV2", "NEW PLYMOUTHV2"),
+    "WGU": ("WGU", "WHANGANUI"),
+    "GSB": ("GSB", "GISBORNE"),
+}
 
 
 def load_font(size, bold=False):
@@ -71,7 +85,7 @@ def clean_route_code(value):
 
 
 def is_route_code(value):
-    return value == "HST" or any(char.isdigit() for char in value)
+    return value in TEXT_ONLY_ROUTE_CODES or any(char.isdigit() for char in value)
 
 
 def clean_number(value):
@@ -94,6 +108,12 @@ def parse_total_breakdown(value, province_count):
     if len(numbers) == 1:
         return numbers[0], numbers[0] - province_count, province_count, 0
     return 0, 0, province_count, 0
+
+
+def non_auckland_summary_rows(df, total_row):
+    header_rows = df.index[df.iloc[:, 0].map(clean_text).eq("Aliexpress 单量")]
+    header_row = int(header_rows[0]) if not header_rows.empty else total_row + 1
+    return header_row, header_row + 1
 
 
 def text_size(draw, text, font):
@@ -471,6 +491,7 @@ def build_non_auckland_messages():
 
     total_rows = df.index[df.iloc[:, 0].map(clean_text).eq("总计")]
     total_row = int(total_rows[0]) if not total_rows.empty else 10
+    summary_header_row, summary_value_row = non_auckland_summary_rows(df, total_row)
 
     overview = df.iloc[2 : total_row + 1, [0, 2, 5, 6]].copy()
     overview.columns = ["station", "arrival_volume", "cainiao_volume", "sunyou_volume"]
@@ -492,16 +513,18 @@ def build_non_auckland_messages():
     base_3l = clean_number(df.iloc[1, 7]) or BOARD_3L_CAPACITY
     base_5l = clean_number(df.iloc[12, 7]) or BOARD_5L_CAPACITY
 
-    aliexpress_count = clean_number(df.iloc[13, 0])
-    sunyou_count = clean_number(df.iloc[13, 2])
+    aliexpress_count = clean_number(df.iloc[summary_value_row, 0])
+    sunyou_count = clean_number(df.iloc[summary_value_row, 2])
     province_total = overview.loc[overview["station"].eq("总计"), "arrival_volume"]
     province_count = clean_number(province_total.iloc[0]) if not province_total.empty else 0
     total_count, auckland_count, province_count, unassigned_count = (
-        parse_total_breakdown(df.iloc[13, 5], province_count)
+        parse_total_breakdown(df.iloc[summary_value_row, 5], province_count)
     )
     if not total_count:
-        total_count = clean_number(df.iloc[13, 3]) or clean_number(df.iloc[13, 5])
-        auckland_count = clean_number(df.iloc[13, 4]) or total_count - province_count
+        total_count = clean_number(df.iloc[summary_value_row, 3]) or clean_number(
+            df.iloc[summary_value_row, 5]
+        )
+        auckland_count = clean_number(df.iloc[summary_value_row, 4]) or total_count - province_count
         unassigned_count = max(
             0,
             total_count - auckland_count - province_count,
@@ -536,20 +559,9 @@ def build_route_detail_messages():
             station_counts = route_counts_by_station.setdefault(station, {})
             station_counts[route_code] = station_counts.get(route_code, 0) + 1
 
-    stations_by_message = {
-        "WGR": ("WGR",),
-        "HMT": ("HMT",),
-        "PMN": ("PMN", "PMNV2", "PALMERSTON NORTHV2"),
-        "RTR": ("RTR",),
-        "TPO": ("TPO",),
-        "TRG": ("TRG",),
-        "NPL_HST": ("NPL", "HST"),
-        "WLTV2": ("WLTV2",),
-    }
-
     details_by_name = {}
 
-    for name, stations in stations_by_message.items():
+    for name, stations in PROVINCE_STATIONS_BY_MESSAGE.items():
         combined_counts = {}
         for station in stations:
             for route_code, quantity in route_counts_by_station.get(station, {}).items():

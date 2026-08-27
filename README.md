@@ -256,7 +256,7 @@ output/query_list.txt
 常见派件网点简码包括：
 
 ```text
-AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST
+AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST, NPMV2, WGU, GSB
 ```
 
 其中：
@@ -564,6 +564,9 @@ TRG各线路预测.png
 PMN各线路预测.png
 TPO各线路预测.png
 NPL_HST各线路预测.png
+NPMV2各线路预测.png
+WGU各线路预测.png
+GSB各线路预测.png
 ```
 
 ### 注意事项
@@ -720,7 +723,7 @@ The script picks the latest valid workbook. Required columns:
 Common station codes:
 
 ```text
-AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST
+AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST, NPMV2, WGU, GSB
 ```
 
 Rules:
@@ -951,6 +954,9 @@ Examples:
 HMT各线路预测.png
 TRG各线路预测.png
 NPL_HST各线路预测.png
+NPMV2各线路预测.png
+WGU各线路预测.png
+GSB各线路预测.png
 ```
 
 ### Notes

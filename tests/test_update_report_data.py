@@ -34,6 +34,12 @@ class UpdateReportDataTests(unittest.TestCase):
             12,
         )
 
+    def test_new_plymouth_v2_is_distinct_from_palmerston_north_v2(self):
+        counts = Counter({"NPMV2": 205, "PMNV2": 770})
+
+        self.assertEqual(update_report_data.station_count(counts, "NPMV2"), 205)
+        self.assertEqual(update_report_data.station_count(counts, "PMN"), 770)
+
     def test_auckland_route_counts_exclude_other_and_blank_stations(self):
         frame = pd.DataFrame(
             {
@@ -146,7 +152,114 @@ class UpdateReportDataTests(unittest.TestCase):
     def test_non_auckland_arrivals_follow_dispatch_distance_order(self):
         self.assertEqual(
             update_report_data.NON_AUCKLAND_STATIONS,
-            ["HMT", "TRG", "RTR", "TPO", "NPL", "HST", "PMN", "WLTV2", "WGR"],
+            [
+                "HMT",
+                "TRG",
+                "RTR",
+                "TPO",
+                "NPL",
+                "HST",
+                "PMN",
+                "WLTV2",
+                "WGR",
+                "NPMV2",
+                "WGU",
+                "GSB",
+            ],
+        )
+
+    def test_new_stations_move_summary_below_the_expanded_overview(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "非奥克兰"
+        old_stations = ["HMT", "TRG", "WLTV2", "NPL", "PMN", "RTR", "WGR", "HST"]
+        for row, station in enumerate(old_stations, start=3):
+            worksheet.cell(row, 1).value = station
+        worksheet.cell(11, 1).value = "总计"
+        worksheet.cell(13, 1).value = "Aliexpress 单量"
+        worksheet.cell(13, 3).value = "顺友单量"
+        worksheet.cell(13, 6).value = "当天总量（奥克兰 + 外省 + 未分配）"
+        worksheet.cell(14, 1).value = 0
+        worksheet.cell(14, 3).value = 0
+        worksheet.cell(14, 6).value = "0(0+0)"
+        for col in (1, 3, 6):
+            worksheet.cell(13, col).number_format = "@"
+            worksheet.cell(14, col).number_format = "0"
+        worksheet.cell(13, 8).value = 350
+
+        station_counts = Counter(
+            {
+                "HMT": 2045,
+                "TRG": 1529,
+                "RTR": 602,
+                "TPO": 288,
+                "NPL": 608,
+                "HST": 471,
+                "PMNV2": 770,
+                "WLTV2": 1414,
+                "WGR": 543,
+                "NPMV2": 205,
+                "WGU": 174,
+                "GSB": 123,
+            }
+        )
+
+        non_auckland_total = update_report_data.update_non_auckland_sheet(
+            workbook,
+            station_counts=station_counts,
+            cainiao_counts=Counter(),
+            sunyou_counts=Counter(),
+            aliexpress_count=0,
+            sunyou_count=0,
+            auckland_total=7268,
+            source_total=16042,
+        )
+
+        self.assertEqual(non_auckland_total, 8772)
+        self.assertEqual(
+            [worksheet.cell(row, 1).value for row in range(3, 15)],
+            update_report_data.NON_AUCKLAND_STATIONS,
+        )
+        self.assertEqual(worksheet.cell(15, 1).value, "总计")
+        self.assertEqual(worksheet.cell(15, 3).value, 8772)
+        self.assertEqual(worksheet.cell(16, 1).value, "Aliexpress 单量")
+        self.assertEqual(worksheet.cell(16, 3).value, "顺友单量")
+        self.assertEqual(worksheet.cell(16, 1).number_format, "@")
+        self.assertEqual(worksheet.cell(17, 1).number_format, "0")
+        self.assertEqual(
+            worksheet.cell(16, 6).value,
+            "当天总量（奥克兰 + 外省 + 未分配）",
+        )
+        self.assertEqual(worksheet.cell(17, 6).value, "16042(7268+8772+2)")
+        self.assertEqual(worksheet.cell(2, 8).value, 200)
+        self.assertEqual(worksheet.cell(13, 8).value, 350)
+        self.assertEqual(worksheet.cell(14, 8).value, "HMT")
+        self.assertEqual(worksheet.cell(22, 8).value, "总计")
+
+    def test_expanded_summary_layout_is_idempotent_when_merged(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "非奥克兰"
+        for row, station in enumerate(update_report_data.NON_AUCKLAND_STATIONS, start=3):
+            worksheet.cell(row, 1).value = station
+        worksheet.cell(15, 1).value = "总计"
+        worksheet.cell(16, 1).value = "Aliexpress 单量"
+        worksheet.cell(16, 6).value = "当天总量（奥克兰 + 外省 + 未分配）"
+        worksheet.cell(17, 6).value = "16042(7268+8772+2)"
+        worksheet.merge_cells("F16:G16")
+        worksheet.merge_cells("F17:G17")
+
+        for _ in range(2):
+            self.assertEqual(
+                update_report_data.ensure_non_auckland_station_rows(worksheet),
+                15,
+            )
+
+        self.assertEqual(worksheet.cell(16, 1).value, "Aliexpress 单量")
+        self.assertEqual(worksheet.cell(17, 6).value, "16042(7268+8772+2)")
+        self.assertEqual(
+            {str(merged_range) for merged_range in worksheet.merged_cells.ranges},
+            {"F16:G16", "F17:G17"},
         )
 
     def test_manual_english_export_headers_are_canonicalized(self):

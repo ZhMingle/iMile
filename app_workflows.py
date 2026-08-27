@@ -12,7 +12,20 @@ from report_source_freshness import center_waybill_file_freshness_warning
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 os.chdir(APP_DIR)
 
-ROUTE_GROUP_CODES = ("WLTV2", "HMT", "TRG", "NPL", "HST", "PMN", "TPO", "RTR", "WGR")
+ROUTE_GROUP_CODES = (
+    "WLTV2",
+    "HMT",
+    "TRG",
+    "NPL",
+    "HST",
+    "PMN",
+    "TPO",
+    "RTR",
+    "WGR",
+    "NPMV2",
+    "WGU",
+    "GSB",
+)
 
 
 def load_lark_config(config_path=None):

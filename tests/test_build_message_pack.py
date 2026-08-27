@@ -368,6 +368,21 @@ class BuildMessagePackTests(unittest.TestCase):
             (8238, 4790, 0, 3448),
         )
 
+    def test_non_auckland_summary_rows_follow_the_expanded_station_table(self):
+        frame = pd.DataFrame([[""] * 7 for _ in range(18)])
+        frame.iloc[14, 0] = "总计"
+        frame.iloc[15, 0] = "Aliexpress 单量"
+        frame.iloc[16, 0] = "100"
+
+        self.assertEqual(
+            build_message_pack.non_auckland_summary_rows(frame, total_row=14),
+            (15, 16),
+        )
+
+    def test_gisborne_text_route_code_is_kept(self):
+        self.assertTrue(build_message_pack.is_route_code("GSB"))
+        self.assertIn("GSB", build_message_pack.PROVINCE_STATIONS_BY_MESSAGE)
+
     def test_non_auckland_image_accepts_the_workbook_board_capacity(self):
         overview = pd.DataFrame(
             [["总计", 0, 0, 0]],

@@ -50,17 +50,36 @@ MERCHANT_CODES = {
 CAINIAO_MERCHANT_CODE = MERCHANT_CODES["CAINIAO"]
 SUNYOU_MERCHANT_CODE = MERCHANT_CODES["SUNYOU"]
 
-NON_AUCKLAND_STATIONS = ["HMT", "TRG", "RTR", "TPO", "NPL", "HST", "PMN", "WLTV2", "WGR"]
+NON_AUCKLAND_STATIONS = [
+    "HMT",
+    "TRG",
+    "RTR",
+    "TPO",
+    "NPL",
+    "HST",
+    "PMN",
+    "WLTV2",
+    "WGR",
+    "NPMV2",
+    "WGU",
+    "GSB",
+]
 BOARD_FORECAST_STATIONS = ["HMT", "TRG", "RTR", "TPO", "NPL", "HST", "PMN", "WLTV2"]
 STATION_ALIASES = {
     "WLTV2": ["WLTV2", "WLT", "AKL-DC"],
     "PMN": ["PMN", "PMNV2", "Palmerston NorthV2"],
+    "NPMV2": ["NPMV2", "New PlymouthV2"],
+    "WGU": ["WGU", "Whanganui"],
+    "GSB": ["GSB", "Gisborne"],
 }
 STATION_DISPLAY_ALIASES = {
     "HMT": "Hamilton",
     "TRG": "Tauranga",
     "NPL": "Napier",
     "RTR": " Rotorua",
+    "NPMV2": "New PlymouthV2",
+    "WGU": "Whanganui",
+    "GSB": "Gisborne",
 }
 AUCKLAND_ROUTE_SUPPLIERS = {
     "404A": "Feng",
@@ -369,6 +388,57 @@ def ensure_non_auckland_station_rows(ws):
     current_total_row = find_total_row(ws, column=1)
     target_total_row = 3 + len(NON_AUCKLAND_STATIONS)
     total_label = ws.cell(current_total_row, 1).value
+    current_summary_header_row = current_total_row + 1
+    for row in range(current_total_row + 1, ws.max_row + 1):
+        if (
+            clean_text(ws.cell(row, 1).value) == "Aliexpress 单量"
+            or clean_text(ws.cell(row, 6).value).startswith("当天总量")
+        ):
+            current_summary_header_row = row
+            break
+    current_summary_rows = (current_summary_header_row, current_summary_header_row + 1)
+    target_summary_rows = (target_total_row + 1, target_total_row + 2)
+    summary_snapshots = []
+    for row in current_summary_rows:
+        row_snapshot = []
+        for col in range(1, 8):
+            cell = ws.cell(row, col)
+            row_snapshot.append(
+                {
+                    "value": cell.value,
+                    **{
+                        attr: copy(getattr(cell, attr))
+                        for attr in [
+                            "fill",
+                            "font",
+                            "border",
+                            "alignment",
+                            "number_format",
+                            "protection",
+                        ]
+                    },
+                }
+            )
+        summary_snapshots.append(row_snapshot)
+
+    summary_merges = []
+    for merged_range in list(ws.merged_cells.ranges):
+        if (
+            merged_range.min_row >= current_summary_rows[0]
+            and merged_range.max_row <= current_summary_rows[1]
+            and merged_range.min_col >= 1
+            and merged_range.max_col <= 7
+        ):
+            summary_merges.append(
+                (
+                    merged_range.min_row - current_summary_rows[0],
+                    merged_range.max_row - current_summary_rows[0],
+                    merged_range.min_col,
+                    merged_range.max_col,
+                )
+            )
+            ws.unmerge_cells(str(merged_range))
+
     existing_station_values = {}
     for row in range(3, current_total_row):
         station = clean_text(ws.cell(row, 1).value)
@@ -401,6 +471,28 @@ def ensure_non_auckland_station_rows(ws):
         target_cell = ws.cell(target_total_row, col)
         for attr, value in style.items():
             setattr(target_cell, attr, copy(value))
+
+    for target_row, row_snapshot in zip(target_summary_rows, summary_snapshots):
+        for col, cell_snapshot in enumerate(row_snapshot, start=1):
+            target_cell = ws.cell(target_row, col)
+            target_cell.value = cell_snapshot["value"]
+            for attr in [
+                "fill",
+                "font",
+                "border",
+                "alignment",
+                "number_format",
+                "protection",
+            ]:
+                setattr(target_cell, attr, copy(cell_snapshot[attr]))
+
+    for min_row_offset, max_row_offset, min_col, max_col in summary_merges:
+        ws.merge_cells(
+            start_row=target_summary_rows[0] + min_row_offset,
+            end_row=target_summary_rows[0] + max_row_offset,
+            start_column=min_col,
+            end_column=max_col,
+        )
 
     for row, station in enumerate(NON_AUCKLAND_STATIONS, start=3):
         ws.cell(row, 1).value = station
@@ -494,6 +586,8 @@ def update_non_auckland_sheet(
     ws.cell(1, 1).value = f"{REPORT_DATE}非奥克兰到件货量"
     ws.cell(1, 9).value = REPORT_DATE
     total_row = ensure_non_auckland_station_rows(ws)
+    summary_header_row = total_row + 1
+    summary_value_row = total_row + 2
 
     for row in range(3, total_row):
         station = clean_text(ws.cell(row, 1).value)
@@ -518,15 +612,18 @@ def update_non_auckland_sheet(
     ws.cell(total_row, 3).value = non_auckland_total
     ws.cell(total_row, 6).value = cainiao_total
     ws.cell(total_row, 7).value = sunyou_total
-    ws.cell(14, 1).value = aliexpress_count
-    ws.cell(13, 3).value = "顺友单量"
-    ws.cell(14, 3).value = sunyou_count
+    ws.cell(summary_header_row, 1).value = "Aliexpress 单量"
+    ws.cell(summary_value_row, 1).value = aliexpress_count
+    ws.cell(summary_header_row, 3).value = "顺友单量"
+    ws.cell(summary_value_row, 3).value = sunyou_count
 
     write_total_breakdown(
         ws,
         auckland_total,
         non_auckland_total,
         source_total,
+        summary_header_row=summary_header_row,
+        summary_value_row=summary_value_row,
     )
 
     write_board_forecast_values(ws)
@@ -539,6 +636,8 @@ def write_total_breakdown(
     auckland_total,
     non_auckland_total,
     source_total=None,
+    summary_header_row=13,
+    summary_value_row=14,
 ):
     classified_total = auckland_total + non_auckland_total
     total = classified_total if source_total is None else source_total
@@ -549,8 +648,8 @@ def write_total_breakdown(
             "the report would double-count waybills."
         )
 
-    source_header = ws.cell(13, 6)
-    source_value = ws.cell(14, 6)
+    source_header = ws.cell(summary_header_row, 6)
+    source_value = ws.cell(summary_value_row, 6)
     header_style = {
         attr: copy(getattr(source_header, attr))
         for attr in ["fill", "font", "border", "alignment", "number_format", "protection"]
@@ -562,25 +661,35 @@ def write_total_breakdown(
 
     for merged_range in list(ws.merged_cells.ranges):
         if (
-            merged_range.min_row <= 14
-            and merged_range.max_row >= 13
+            merged_range.min_row <= summary_value_row
+            and merged_range.max_row >= summary_header_row
             and merged_range.min_col <= 7
             and merged_range.max_col >= 4
         ):
             ws.unmerge_cells(str(merged_range))
 
-    ws.cell(13, 4).value = None
-    ws.cell(14, 4).value = None
-    ws.cell(13, 5).value = None
-    ws.cell(14, 5).value = None
-    ws.cell(13, 7).value = None
-    ws.cell(14, 7).value = None
+    ws.cell(summary_header_row, 4).value = None
+    ws.cell(summary_value_row, 4).value = None
+    ws.cell(summary_header_row, 5).value = None
+    ws.cell(summary_value_row, 5).value = None
+    ws.cell(summary_header_row, 7).value = None
+    ws.cell(summary_value_row, 7).value = None
 
-    ws.merge_cells(start_row=13, start_column=6, end_row=13, end_column=7)
-    ws.merge_cells(start_row=14, start_column=6, end_row=14, end_column=7)
+    ws.merge_cells(
+        start_row=summary_header_row,
+        start_column=6,
+        end_row=summary_header_row,
+        end_column=7,
+    )
+    ws.merge_cells(
+        start_row=summary_value_row,
+        start_column=6,
+        end_row=summary_value_row,
+        end_column=7,
+    )
 
-    header_cell = ws.cell(13, 6)
-    value_cell = ws.cell(14, 6)
+    header_cell = ws.cell(summary_header_row, 6)
+    value_cell = ws.cell(summary_value_row, 6)
     if unassigned_total:
         header_cell.value = "当天总量（奥克兰 + 外省 + 未分配）"
         value_cell.value = (
