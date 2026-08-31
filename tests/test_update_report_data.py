@@ -123,31 +123,75 @@ class UpdateReportDataTests(unittest.TestCase):
             "RTR": 440,
             "WGR": 417,
             "HST": 345,
+            "NPMV2": 195,
+            "WGU": 166,
+            "GSB": 88,
         }
         for row, (station, arrival) in enumerate(arrivals.items(), start=3):
             worksheet.cell(row, 1).value = station
             worksheet.cell(row, 3).value = arrival
-        worksheet.cell(12, 1).value = "总计"
+        worksheet.cell(15, 1).value = "总计"
         worksheet.cell(2, 8).value = 135
+        worksheet.cell(2, 9).value = "3L预测板数"
         worksheet.cell(13, 8).value = 350
+        worksheet.cell(13, 9).value = "5L预测板数"
+        for row in range(3, 12):
+            worksheet.row_dimensions[row].height = 18
+        worksheet.row_dimensions[13].height = 22.5
+        worksheet.row_dimensions[14].height = 22.5
+        worksheet.row_dimensions[15].height = 31
 
         update_report_data.write_board_forecast_values(worksheet)
+        update_report_data.write_board_forecast_values(worksheet)
 
-        self.assertEqual(worksheet.cell(2, 8).value, 200)
+        self.assertEqual(worksheet.column_dimensions["H"].width, 16)
+        self.assertEqual(worksheet.column_dimensions["I"].width, 24)
+        self.assertEqual(worksheet.cell(1, 8).value, 200)
         self.assertEqual(
-            [worksheet.cell(row, 8).value for row in range(3, 11)],
-            ["HMT", "TRG", "RTR", "TPO", "NPL", "HST", "PMN", "WLTV2"],
+            [worksheet.cell(row, 8).value for row in range(2, 11)],
+            ["HMT", "TRG/RTR", "TPO", "NPL/HST", "PMN", "WLTV2", "NPMV2", "WGU", "GSB"],
         )
         self.assertEqual(
-            [worksheet.cell(row, 9).value for row in range(3, 11)],
-            [7.85, 5.95, 2.2, 1.0, 2.47, 1.73, 3.4, 7.87],
+            [worksheet.cell(row, 9).value for row in range(2, 11)],
+            [7.85, "5.95/2.2(8.15)", 1.0, "2.47/1.73(4.2)", 3.4, 7.87, 0.97, 0.83, 0.44],
         )
-        self.assertEqual(worksheet.cell(11, 9).value, 32.47)
+        self.assertEqual(worksheet.cell(11, 8).value, "总计")
+        self.assertEqual(worksheet.cell(11, 9).value, 34.71)
         self.assertEqual(
-            [worksheet.cell(row, 8).value for row in range(14, 22)],
-            ["HMT", "TRG", "RTR", "TPO", "NPL", "HST", "PMN", "WLTV2"],
+            [worksheet.row_dimensions[row].height for row in range(2, 12)],
+            [18] * 10,
         )
-        self.assertEqual(worksheet.cell(22, 9).value, 18.56)
+        self.assertIsNone(worksheet.cell(12, 8).value)
+        self.assertEqual(worksheet.cell(13, 8).value, 350)
+        self.assertEqual(worksheet.cell(13, 9).value, "5L预测板数")
+        self.assertEqual(
+            [worksheet.cell(row, 8).value for row in range(14, 23)],
+            ["HMT", "TRG/RTR", "TPO", "NPL/HST", "PMN", "WLTV2", "NPMV2", "WGU", "GSB"],
+        )
+        self.assertEqual(
+            [worksheet.cell(row, 9).value for row in range(14, 23)],
+            [4.49, "3.4/1.26(4.66)", 0.57, "1.41/0.99(2.4)", 1.94, 4.5, 0.56, 0.47, 0.25],
+        )
+        self.assertEqual(worksheet.cell(23, 8).value, "总计")
+        self.assertEqual(worksheet.cell(23, 9).value, 19.84)
+        self.assertEqual(
+            [worksheet.row_dimensions[row].height for row in range(13, 24)],
+            [22.5] * 11,
+        )
+        self.assertEqual(
+            update_report_data.BOARD_FORECAST_GROUPS,
+            [
+                ("HMT",),
+                ("TRG", "RTR"),
+                ("TPO",),
+                ("NPL", "HST"),
+                ("PMN",),
+                ("WLTV2",),
+                ("NPMV2",),
+                ("WGU",),
+                ("GSB",),
+            ],
+        )
 
     def test_non_auckland_arrivals_follow_dispatch_distance_order(self):
         self.assertEqual(
@@ -231,10 +275,20 @@ class UpdateReportDataTests(unittest.TestCase):
             "当天总量（奥克兰 + 外省 + 未分配）",
         )
         self.assertEqual(worksheet.cell(17, 6).value, "16042(7268+8772+2)")
-        self.assertEqual(worksheet.cell(2, 8).value, 200)
+        self.assertEqual(worksheet.cell(1, 8).value, 200)
+        self.assertEqual(
+            [worksheet.cell(row, 8).value for row in range(2, 11)],
+            ["HMT", "TRG/RTR", "TPO", "NPL/HST", "PMN", "WLTV2", "NPMV2", "WGU", "GSB"],
+        )
+        self.assertEqual(worksheet.cell(11, 8).value, "总计")
+        self.assertIsNone(worksheet.cell(12, 8).value)
         self.assertEqual(worksheet.cell(13, 8).value, 350)
-        self.assertEqual(worksheet.cell(14, 8).value, "HMT")
-        self.assertEqual(worksheet.cell(22, 8).value, "总计")
+        self.assertEqual(worksheet.cell(13, 9).value, "5L预测板数")
+        self.assertEqual(
+            [worksheet.cell(row, 8).value for row in range(14, 23)],
+            ["HMT", "TRG/RTR", "TPO", "NPL/HST", "PMN", "WLTV2", "NPMV2", "WGU", "GSB"],
+        )
+        self.assertEqual(worksheet.cell(23, 8).value, "总计")
 
     def test_expanded_summary_layout_is_idempotent_when_merged(self):
         workbook = Workbook()

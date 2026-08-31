@@ -379,6 +379,56 @@ class BuildMessagePackTests(unittest.TestCase):
             (15, 16),
         )
 
+    def test_board_forecast_tables_follow_their_headers_after_expansion(self):
+        frame = pd.DataFrame([[""] * 9 for _ in range(30)], dtype=object)
+        stations = [
+            "HMT",
+            "TRG/RTR",
+            "TPO",
+            "NPL/HST",
+            "PMN",
+            "WLTV2",
+            "NPMV2",
+            "WGU",
+            "GSB",
+            "总计",
+        ]
+        frame.iloc[1, 7:9] = [200, "3L预测板数"]
+        frame.iloc[13, 7:9] = [350, "5L预测板数"]
+        board_values = [
+            1,
+            "2/3(5)",
+            4,
+            "5/6(11)",
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+        ]
+        for index, station in enumerate(stations):
+            frame.iloc[2 + index, 7:9] = [station, board_values[index]]
+            frame.iloc[14 + index, 7:9] = [station, board_values[index]]
+
+        board_3l, base_3l = build_message_pack.extract_board_forecast_table(
+            frame,
+            "3L预测板数",
+            200,
+        )
+        board_5l, base_5l = build_message_pack.extract_board_forecast_table(
+            frame,
+            "5L预测板数",
+            350,
+        )
+
+        self.assertEqual(board_3l["station"].tolist(), stations)
+        self.assertEqual(board_5l["station"].tolist(), stations)
+        self.assertEqual(board_3l["boards"].tolist(), board_values)
+        self.assertEqual(board_5l["boards"].tolist(), board_values)
+        self.assertEqual(base_3l, 200)
+        self.assertEqual(base_5l, 350)
+
     def test_gisborne_text_route_code_is_kept(self):
         self.assertTrue(build_message_pack.is_route_code("GSB"))
         self.assertIn("GSB", build_message_pack.PROVINCE_STATIONS_BY_MESSAGE)
@@ -420,6 +470,60 @@ class BuildMessagePackTests(unittest.TestCase):
             build_message_pack.draw_centered_text = original
 
         self.assertIn(200, captured)
+
+    def test_non_auckland_image_grows_for_expanded_board_tables(self):
+        overview_stations = [
+            "HMT",
+            "TRG",
+            "RTR",
+            "TPO",
+            "NPL",
+            "HST",
+            "PMN",
+            "WLTV2",
+            "NPMV2",
+            "WGU",
+            "GSB",
+            "总计",
+        ]
+        board_stations = [
+            "HMT",
+            "TRG/RTR",
+            "TPO",
+            "NPL/HST",
+            "PMN",
+            "WLTV2",
+            "NPMV2",
+            "WGU",
+            "GSB",
+            "总计",
+        ]
+        overview = pd.DataFrame(
+            [[station, 0, 0, 0] for station in overview_stations],
+            columns=["station", "arrival_volume", "cainiao_volume", "sunyou_volume"],
+        )
+        boards = pd.DataFrame(
+            [[station, 0] for station in board_stations],
+            columns=["station", "boards"],
+        )
+
+        build_message_pack.render_non_auckland_overview(
+            self.temp_path,
+            overview,
+            boards,
+            boards,
+            200,
+            350,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        )
+
+        with build_message_pack.Image.open(self.temp_path) as image:
+            self.assertEqual(image.height, build_message_pack.px(872))
 
     def setUp(self):
         self.temp_path = build_message_pack.OUTPUT_DIR / "test_board_capacity.png"

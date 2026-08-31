@@ -592,7 +592,9 @@ class IMileWin32App:
                 gdi32.SetTextColor(hdc, COLOR_TEXT)
             return self.card_brush
 
-        gdi32.SetBkMode(hdc, TRANSPARENT)
+        # EDIT controls repaint changed text without erasing the whole window.
+        # An opaque background clears old glyphs when deleting or replacing text.
+        gdi32.SetBkMode(hdc, OPAQUE)
         gdi32.SetBkColor(hdc, COLOR_CARD)
         gdi32.SetTextColor(hdc, COLOR_TEXT)
         return self.card_brush

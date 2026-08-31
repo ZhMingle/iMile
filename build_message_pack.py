@@ -97,6 +97,13 @@ def clean_number(value):
     return round(float(number), 2)
 
 
+def clean_board_value(value):
+    text = clean_text(value)
+    if "/" in text or "(" in text:
+        return text
+    return clean_number(value)
+
+
 def parse_total_breakdown(value, province_count):
     text = clean_text(value)
     numbers = [clean_number(match) for match in re.findall(r"-?\d+(?:\.\d+)?", text)]
@@ -114,6 +121,28 @@ def non_auckland_summary_rows(df, total_row):
     header_rows = df.index[df.iloc[:, 0].map(clean_text).eq("Aliexpress 单量")]
     header_row = int(header_rows[0]) if not header_rows.empty else total_row + 1
     return header_row, header_row + 1
+
+
+def extract_board_forecast_table(df, title, default_capacity):
+    header_rows = df.index[df.iloc[:, 8].map(clean_text).eq(title)]
+    if header_rows.empty:
+        raise ValueError(f"Could not find {title} in 非奥克兰")
+    header_row = int(header_rows[0])
+
+    total_rows = df.index[
+        (df.index > header_row)
+        & df.iloc[:, 7].map(clean_text).eq("总计")
+    ]
+    if total_rows.empty:
+        raise ValueError(f"Could not find the total row for {title} in 非奥克兰")
+    total_row = int(total_rows[0])
+
+    table = df.iloc[header_row + 1 : total_row + 1, [7, 8]].copy()
+    table.columns = ["station", "boards"]
+    table["station"] = table["station"].map(clean_text)
+    table["boards"] = table["boards"].map(clean_board_value)
+    capacity = clean_number(df.iloc[header_row, 7]) or default_capacity
+    return table, capacity
 
 
 def text_size(draw, text, font):
@@ -380,10 +409,20 @@ def render_non_auckland_overview(
     title_h = 60
     header_h = 48
     gap = 28
+    total_value_h = 52
     main_widths = [210, 210, 300, 300]
     side_widths = [100, 190]
     width = sum(main_widths) + gap + sum(side_widths)
-    height = 840
+    main_summary_y = title_h + header_h + cell_h * len(overview) + gap
+    main_end_y = main_summary_y + header_h + max(cell_h, total_value_h)
+    # Keep the board panel flush with the top edge; the main title remains in
+    # the wider left panel while the board forecast starts on the first row.
+    board_3l_y = 0
+    board_3l_height = header_h + cell_h * len(board_3l)
+    board_5l_y = board_3l_y + board_3l_height + gap
+    board_5l_height = header_h + cell_h * len(board_5l)
+    side_end_y = board_5l_y + board_5l_height
+    height = max(main_end_y, side_end_y) + gap
     image = Image.new("RGB", (px(width), px(height)), WHITE)
     draw = ImageDraw.Draw(image)
 
@@ -410,7 +449,6 @@ def render_non_auckland_overview(
         y += cell_h
 
     y += 28
-    total_value_h = 52
     rect(draw, [x0, y, x0 + main_widths[0], y + header_h], fill=LIGHT_BLUE, outline=BLACK, width=line_width())
     draw_centered_text(draw, (x0, y, x0 + main_widths[0], y + header_h), "Aliexpress 单量", FONT_HEADER)
     rect(draw, [x0, y + header_h, x0 + main_widths[0], y + header_h + cell_h], fill=WHITE, outline=BLACK, width=line_width())
@@ -454,11 +492,11 @@ def render_non_auckland_overview(
     side_x = main_w + gap
     board_3l_img = board_3l.copy()
     board_3l_img["base"] = base_3l
-    draw_board_table(side_x, 60, "3L预测板数", board_3l_img)
+    draw_board_table(side_x, board_3l_y, "3L预测板数", board_3l_img)
 
     board_5l_img = board_5l.copy()
     board_5l_img["base"] = base_5l
-    draw_board_table(side_x, 460, "5L预测板数", board_5l_img)
+    draw_board_table(side_x, board_5l_y, "5L预测板数", board_5l_img)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     image.save(path)
@@ -500,18 +538,16 @@ def build_non_auckland_messages():
     overview["cainiao_volume"] = overview["cainiao_volume"].map(clean_number)
     overview["sunyou_volume"] = overview["sunyou_volume"].map(clean_number)
 
-    board_3l = df.iloc[2:11, [7, 8]].copy()
-    board_3l.columns = ["station", "boards"]
-    board_3l["station"] = board_3l["station"].map(clean_text)
-    board_3l["boards"] = board_3l["boards"].map(clean_number)
-
-    board_5l = df.iloc[13:22, [7, 8]].copy()
-    board_5l.columns = ["station", "boards"]
-    board_5l["station"] = board_5l["station"].map(clean_text)
-    board_5l["boards"] = board_5l["boards"].map(clean_number)
-
-    base_3l = clean_number(df.iloc[1, 7]) or BOARD_3L_CAPACITY
-    base_5l = clean_number(df.iloc[12, 7]) or BOARD_5L_CAPACITY
+    board_3l, base_3l = extract_board_forecast_table(
+        df,
+        "3L预测板数",
+        BOARD_3L_CAPACITY,
+    )
+    board_5l, base_5l = extract_board_forecast_table(
+        df,
+        "5L预测板数",
+        BOARD_5L_CAPACITY,
+    )
 
     aliexpress_count = clean_number(df.iloc[summary_value_row, 0])
     sunyou_count = clean_number(df.iloc[summary_value_row, 2])

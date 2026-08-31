@@ -64,7 +64,22 @@ NON_AUCKLAND_STATIONS = [
     "WGU",
     "GSB",
 ]
-BOARD_FORECAST_STATIONS = ["HMT", "TRG", "RTR", "TPO", "NPL", "HST", "PMN", "WLTV2"]
+BOARD_FORECAST_GROUPS = [
+    ("HMT",),
+    ("TRG", "RTR"),
+    ("TPO",),
+    ("NPL", "HST"),
+    ("PMN",),
+    ("WLTV2",),
+    ("NPMV2",),
+    ("WGU",),
+    ("GSB",),
+]
+BOARD_FORECAST_STATIONS = [
+    station
+    for group in BOARD_FORECAST_GROUPS
+    for station in group
+]
 STATION_ALIASES = {
     "WLTV2": ["WLTV2", "WLT", "AKL-DC"],
     "PMN": ["PMN", "PMNV2", "Palmerston NorthV2"],
@@ -715,21 +730,139 @@ def round_excel(value, digits=2):
     return round(float(value), digits)
 
 
-def copy_board_row_style(ws, source_row, target_row):
-    for col in (8, 9):
-        source_cell = ws.cell(source_row, col)
-        target_cell = ws.cell(target_row, col)
-        for attr in ["fill", "font", "border", "alignment", "number_format", "protection"]:
-            setattr(target_cell, attr, copy(getattr(source_cell, attr)))
+def format_board_count(value):
+    return f"{round_excel(value):.2f}".rstrip("0").rstrip(".")
+
+
+def board_group_forecast(arrival_by_station, group, capacity):
+    forecasts = [
+        round_excel(arrival_by_station.get(station, 0) / capacity)
+        for station in group
+    ]
+    group_total = round_excel(sum(forecasts))
+    if len(group) == 1:
+        return forecasts[0], group_total
+    display = "/".join(format_board_count(value) for value in forecasts)
+    return f"{display}({format_board_count(group_total)})", group_total
+
+
+def snapshot_board_row_style(ws, row):
+    return [
+        {
+            attr: copy(getattr(ws.cell(row, col), attr))
+            for attr in ["fill", "font", "border", "alignment", "number_format", "protection"]
+        }
+        for col in (8, 9)
+    ]
+
+
+def apply_board_row_style(ws, row, style):
+    for col, cell_style in zip((8, 9), style):
+        for attr, value in cell_style.items():
+            setattr(ws.cell(row, col), attr, copy(value))
+
+
+def set_board_row_height(ws, row, height):
+    if height is not None:
+        ws.row_dimensions[row].height = height
+
+
+def find_board_header_row(ws, title, fallback):
+    for row in range(1, ws.max_row + 1):
+        if clean_text(ws.cell(row, 9).value) == title:
+            return row
+    return fallback
+
+
+def find_board_total_row(ws, header_row, fallback):
+    for row in range(header_row + 1, ws.max_row + 1):
+        if clean_text(ws.cell(row, 8).value) == "总计":
+            return row
+    return fallback
+
+
+def board_forecast_layout():
+    group_count = len(BOARD_FORECAST_GROUPS)
+    header_3l_row = 1
+    rows_3l = {
+        row: group
+        for row, group in enumerate(
+            BOARD_FORECAST_GROUPS,
+            start=header_3l_row + 1,
+        )
+    }
+    total_3l_row = header_3l_row + 1 + group_count
+    header_5l_row = total_3l_row + 2
+    rows_5l = {
+        row: group
+        for row, group in enumerate(
+            BOARD_FORECAST_GROUPS,
+            start=header_5l_row + 1,
+        )
+    }
+    total_5l_row = header_5l_row + 1 + group_count
+    return (
+        header_3l_row,
+        rows_3l,
+        total_3l_row,
+        header_5l_row,
+        rows_5l,
+        total_5l_row,
+    )
 
 
 def write_board_forecast_values(ws):
-    # 3L forecasts now use 200 pieces per board.  Persist the assumption in
-    # the report so both the workbook and the generated image show the same
-    # capacity and use it for every station calculation.
-    ws.cell(2, 8).value = BOARD_3L_CAPACITY
+    # Snapshot the legacy/current table styles and 5L capacity before moving
+    # either section.  Grouped rows can move the 5L table upward, so avoid
+    # fixed row assumptions when rewriting the two board sections.
+    old_3l_header_row = find_board_header_row(ws, "3L预测板数", 2)
+    old_5l_header_row = find_board_header_row(ws, "5L预测板数", 13)
+    old_3l_total_row = find_board_total_row(
+        ws,
+        old_3l_header_row,
+        old_5l_header_row - 2,
+    )
+    old_5l_total_row = find_board_total_row(
+        ws,
+        old_5l_header_row,
+        old_5l_header_row + 9,
+    )
+    styles = {
+        "3l_header": snapshot_board_row_style(ws, old_3l_header_row),
+        "3l_data": snapshot_board_row_style(ws, old_3l_header_row + 1),
+        "3l_total": snapshot_board_row_style(ws, old_3l_total_row),
+        "gap": snapshot_board_row_style(ws, old_3l_total_row + 1),
+        "5l_header": snapshot_board_row_style(ws, old_5l_header_row),
+        "5l_data": snapshot_board_row_style(ws, old_5l_header_row + 1),
+        "5l_total": snapshot_board_row_style(ws, old_5l_total_row),
+    }
+    height_3l = ws.row_dimensions[old_3l_header_row + 1].height
+    height_5l_candidates = [
+        ws.row_dimensions[row].height
+        for row in (old_3l_total_row, old_5l_header_row, old_5l_header_row + 1)
+        if ws.row_dimensions[row].height is not None
+    ]
+    height_5l = max(height_5l_candidates) if height_5l_candidates else None
+
+    (
+        header_3l_row,
+        rows_3l,
+        total_3l_row,
+        header_5l_row,
+        rows_5l,
+        total_5l_row,
+    ) = (
+        board_forecast_layout()
+    )
+
+    # Grouped values such as ``2.41/0.91(3.32)`` need a little more room than
+    # the legacy single-station values.  Grow only the two board columns and
+    # preserve any wider template-specific settings.
+    ws.column_dimensions["H"].width = max(ws.column_dimensions["H"].width or 0, 16)
+    ws.column_dimensions["I"].width = max(ws.column_dimensions["I"].width or 0, 24)
+
+    base_5l = ws.cell(old_5l_header_row, 8).value or BOARD_5L_CAPACITY
     base_3l = BOARD_3L_CAPACITY
-    base_5l = ws.cell(13, 8).value or BOARD_5L_CAPACITY
 
     total_row = find_total_row(ws, column=1)
     arrival_by_station = {
@@ -737,41 +870,57 @@ def write_board_forecast_values(ws):
         for row in range(3, total_row)
     }
 
-    rows_3l = {
-        row: station
-        for row, station in enumerate(BOARD_FORECAST_STATIONS, start=3)
-    }
-    rows_5l = {
-        row: station
-        for row, station in enumerate(BOARD_FORECAST_STATIONS, start=14)
-    }
+    for row in range(1, max(old_5l_total_row, total_5l_row) + 1):
+        ws.cell(row, 8).value = None
+        ws.cell(row, 9).value = None
 
-    copy_board_row_style(ws, 10, 11)
-    copy_board_row_style(ws, 9, 10)
-    copy_board_row_style(ws, 21, 22)
-    copy_board_row_style(ws, 20, 21)
+    apply_board_row_style(ws, header_3l_row, styles["3l_header"])
+    ws.cell(header_3l_row, 8).value = base_3l
+    ws.cell(header_3l_row, 9).value = "3L预测板数"
 
-    for row, station in rows_3l.items():
-        ws.cell(row, 8).value = station
-        ws.cell(row, 9).value = round_excel(arrival_by_station.get(station, 0) / base_3l)
+    total_3l_forecast = 0
+    for row, group in rows_3l.items():
+        apply_board_row_style(ws, row, styles["3l_data"])
+        set_board_row_height(ws, row, height_3l)
+        forecast, group_total = board_group_forecast(
+            arrival_by_station,
+            group,
+            base_3l,
+        )
+        ws.cell(row, 8).value = "/".join(group)
+        ws.cell(row, 9).value = forecast
+        total_3l_forecast += group_total
 
-    ws.cell(11, 8).value = "总计"
-    ws.cell(11, 9).value = sum(
-        ws.cell(row, 9).value or 0
-        for row in rows_3l
-    )
-    ws.cell(11, 9).value = round_excel(ws.cell(11, 9).value)
+    apply_board_row_style(ws, total_3l_row, styles["3l_total"])
+    set_board_row_height(ws, total_3l_row, height_3l)
+    ws.cell(total_3l_row, 8).value = "总计"
+    ws.cell(total_3l_row, 9).value = round_excel(total_3l_forecast)
 
-    for row, station in rows_5l.items():
-        ws.cell(row, 8).value = station
-        ws.cell(row, 9).value = round_excel(arrival_by_station.get(station, 0) / base_5l)
+    gap_row = total_3l_row + 1
+    apply_board_row_style(ws, gap_row, styles["gap"])
 
-    ws.cell(22, 8).value = "总计"
-    ws.cell(22, 9).value = sum(
-        ws.cell(row, 9).value or 0
-        for row in rows_5l
-    )
-    ws.cell(22, 9).value = round_excel(ws.cell(22, 9).value)
+    apply_board_row_style(ws, header_5l_row, styles["5l_header"])
+    set_board_row_height(ws, header_5l_row, height_5l)
+    ws.cell(header_5l_row, 8).value = base_5l
+    ws.cell(header_5l_row, 9).value = "5L预测板数"
+
+    total_5l_forecast = 0
+    for row, group in rows_5l.items():
+        apply_board_row_style(ws, row, styles["5l_data"])
+        set_board_row_height(ws, row, height_5l)
+        forecast, group_total = board_group_forecast(
+            arrival_by_station,
+            group,
+            base_5l,
+        )
+        ws.cell(row, 8).value = "/".join(group)
+        ws.cell(row, 9).value = forecast
+        total_5l_forecast += group_total
+
+    apply_board_row_style(ws, total_5l_row, styles["5l_total"])
+    set_board_row_height(ws, total_5l_row, height_5l)
+    ws.cell(total_5l_row, 8).value = "总计"
+    ws.cell(total_5l_row, 9).value = round_excel(total_5l_forecast)
 
 
 def main(source_file=None, allow_old_source=False):
