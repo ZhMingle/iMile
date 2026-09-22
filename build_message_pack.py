@@ -1,3 +1,4 @@
+import argparse
 from datetime import datetime
 from pathlib import Path
 import re
@@ -6,26 +7,15 @@ import pandas as pd
 from openpyxl import load_workbook
 from PIL import Image, ImageDraw, ImageFont
 
-from report_config import BOARD_3L_CAPACITY, BOARD_5L_CAPACITY, SUPPLIER_ROUTE_GROUPS
+from report_config import (
+    BOARD_3L_CAPACITY,
+    BOARD_5L_CAPACITY,
+    PROVINCE_STATIONS_BY_MESSAGE,
+    SUPPLIER_ROUTE_GROUPS,
+)
 
 
-REPORT_FILES = sorted(
-    [
-        path
-        for path in Path(".").glob("*当日数据统计*.xlsx")
-        if not path.name.startswith("~$")
-    ],
-    key=lambda path: path.stat().st_mtime,
-)
-UPDATED_REPORT_FILES = sorted(
-    [
-        path
-        for path in Path("output").glob("当日数据统计*.xlsx")
-        if not path.name.startswith("~$")
-    ],
-    key=lambda path: path.stat().st_mtime,
-)
-REPORT_FILE = REPORT_FILES[-1] if REPORT_FILES else (UPDATED_REPORT_FILES[-1] if UPDATED_REPORT_FILES else Path("当日数据统计.xlsx"))
+DEFAULT_REPORT_FILE = Path("当日数据统计.xlsx")
 OUTPUT_DIR = Path("output")
 SUPPLIER_DIR = OUTPUT_DIR / "supplier"
 PROVINCE_DIR = OUTPUT_DIR / "province"
@@ -40,21 +30,6 @@ TOTAL_BLUE = "#DDEBF7"
 WHITE = "#FFFFFF"
 BLACK = "#000000"
 TEXT_ONLY_ROUTE_CODES = {"HST", "GSB"}
-PROVINCE_STATIONS_BY_MESSAGE = {
-    "WGR": ("WGR",),
-    "HMT": ("HMT",),
-    "PMN": ("PMN", "PMNV2", "PALMERSTON NORTHV2"),
-    "RTR": ("RTR",),
-    "TPO": ("TPO",),
-    "TRG": ("TRG",),
-    "NPL_HST": ("NPL", "HST"),
-    "WLTV2": ("WLTV2",),
-    "NPMV2": ("NPMV2", "NEW PLYMOUTHV2"),
-    "WGU": ("WGU", "WHANGANUI"),
-    "GSB": ("GSB", "GISBORNE"),
-}
-
-
 def load_font(size, bold=False):
     candidates = [
         Path("C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc"),
@@ -502,8 +477,15 @@ def render_non_auckland_overview(
     image.save(path)
 
 
-def build_supplier_messages():
-    df = pd.read_excel(REPORT_FILE, sheet_name="奥克兰", header=None, dtype=str).fillna("")
+def resolve_report_file(report_file=None):
+    path = Path(report_file) if report_file else DEFAULT_REPORT_FILE
+    if not path.is_file():
+        raise FileNotFoundError(f"Report workbook not found: {path}")
+    return path
+
+
+def build_supplier_messages(report_file):
+    df = pd.read_excel(report_file, sheet_name="奥克兰", header=None, dtype=str).fillna("")
     rows = df.iloc[2:101, [0, 2, 6]].copy()
     rows.columns = ["route_code", "quantity", "supplier"]
     rows["route_code"] = rows["route_code"].map(clean_route_code)
@@ -524,8 +506,8 @@ def build_supplier_messages():
     return pd.DataFrame(summary)
 
 
-def build_non_auckland_messages():
-    df = pd.read_excel(REPORT_FILE, sheet_name="非奥克兰", header=None, dtype=str).fillna("")
+def build_non_auckland_messages(report_file):
+    df = pd.read_excel(report_file, sheet_name="非奥克兰", header=None, dtype=str).fillna("")
 
     total_rows = df.index[df.iloc[:, 0].map(clean_text).eq("总计")]
     total_row = int(total_rows[0]) if not total_rows.empty else 10
@@ -582,8 +564,8 @@ def build_non_auckland_messages():
     )
 
 
-def build_route_detail_messages():
-    wb = load_workbook(REPORT_FILE, data_only=False, read_only=True)
+def build_route_detail_messages(report_file):
+    wb = load_workbook(report_file, data_only=False, read_only=True)
     source_ws = wb["数据源1-预测"]
     route_counts_by_station = {}
     for route_code, station in source_ws.iter_rows(
@@ -613,16 +595,24 @@ def build_route_detail_messages():
 
         render_route_image(PROVINCE_DIR / f"{name}各线路预测.png", f"{REPORT_DATE}{name}各线路预测", detail)
 
-def main():
+def main(report_file=None):
+    report_file = resolve_report_file(report_file)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    supplier_summary = build_supplier_messages()
-    build_non_auckland_messages()
-    build_route_detail_messages()
+    supplier_summary = build_supplier_messages(report_file)
+    build_non_auckland_messages(report_file)
+    build_route_detail_messages(report_file)
 
     print(f"Generated supplier messages: {len(supplier_summary)}")
     print(f"Done: {OUTPUT_DIR.resolve()}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Build daily report message images.")
+    parser.add_argument(
+        "--report-file",
+        default=str(DEFAULT_REPORT_FILE),
+        help="Use this exact generated report workbook",
+    )
+    args = parser.parse_args()
+    main(args.report_file)

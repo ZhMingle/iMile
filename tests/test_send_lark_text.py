@@ -31,15 +31,17 @@ class SendLarkTextTests(unittest.TestCase):
             {"name": "NPMV2各线路预测"},
             {"name": "WGU各线路预测"},
             {"name": "GSB各线路预测"},
+            {"name": "CHC各线路预测"},
+            {"name": "DUD各线路预测"},
         ]
 
         codes, indexes = app_workflows.route_group_destination_indexes(
             destinations,
-            "NPMV2 / WGU / GSB",
+            "NPMV2 / WGU / GSB / CHC / DUD",
         )
 
-        self.assertEqual(codes, ["NPMV2", "WGU", "GSB"])
-        self.assertEqual(indexes, [0, 1, 2])
+        self.assertEqual(codes, ["NPMV2", "WGU", "GSB", "CHC", "DUD"])
+        self.assertEqual(indexes, [0, 1, 2, 3, 4])
 
     def test_route_group_search_handles_a_shared_npl_hst_group(self):
         destinations = [{"name": "NPL_HST各线路预测"}]

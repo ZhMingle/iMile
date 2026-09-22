@@ -7,12 +7,13 @@ import shutil
 import sys
 
 from report_source_freshness import center_waybill_file_freshness_warning
+from report_config import NON_AUCKLAND_STATIONS
 
 
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 os.chdir(APP_DIR)
 
-ROUTE_GROUP_CODES = (
+_LEGACY_ROUTE_GROUP_ORDER = (
     "WLTV2",
     "HMT",
     "TRG",
@@ -25,6 +26,15 @@ ROUTE_GROUP_CODES = (
     "NPMV2",
     "WGU",
     "GSB",
+)
+_ROUTE_GROUP_PRIORITY = {
+    code: index for index, code in enumerate(_LEGACY_ROUTE_GROUP_ORDER)
+}
+ROUTE_GROUP_CODES = tuple(
+    sorted(
+        NON_AUCKLAND_STATIONS,
+        key=lambda code: _ROUTE_GROUP_PRIORITY.get(code, len(_ROUTE_GROUP_PRIORITY)),
+    )
 )
 
 
@@ -280,10 +290,10 @@ def run_report(source_file, allow_old_source=False, send_as="app"):
         print(f"Selected source: {source_file.name}")
 
     update_module = importlib.import_module("update_report_data")
-    update_module.main(target, allow_old_source=allow_old_source)
+    report_file = update_module.main(target, allow_old_source=allow_old_source)
 
     build_module = importlib.reload(importlib.import_module("build_message_pack"))
-    build_module.main()
+    build_module.main(report_file)
 
     sender = importlib.import_module("send_lark_images")
     original_argv = sys.argv[:]

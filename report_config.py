@@ -2,6 +2,90 @@ BOARD_3L_CAPACITY = 200
 BOARD_5L_CAPACITY = 350
 
 
+# One authoritative list drives the non-Auckland workbook rows, board forecast
+# rows, route-detail images, and the desktop app's route-group matching.  A new
+# standalone city normally needs only one entry here.
+NON_AUCKLAND_STATION_SPECS = [
+    {"code": "HMT", "display": "Hamilton"},
+    {"code": "TRG", "display": "Tauranga", "forecast_group": "TRG/RTR"},
+    {"code": "RTR", "display": "Rotorua", "forecast_group": "TRG/RTR"},
+    {"code": "TPO"},
+    {"code": "NPL", "display": "Napier", "forecast_group": "NPL/HST", "message_group": "NPL_HST"},
+    {"code": "HST", "display": "Hastings", "forecast_group": "NPL/HST", "message_group": "NPL_HST"},
+    {
+        "code": "PMN",
+        "aliases": ("PMNV2", "Palmerston NorthV2"),
+    },
+    {
+        "code": "WLTV2",
+        "aliases": ("WLT", "AKL-DC"),
+    },
+    {"code": "WGR", "include_in_forecast": False},
+    {
+        "code": "NPMV2",
+        "display": "New PlymouthV2",
+        "aliases": ("New PlymouthV2",),
+    },
+    {
+        "code": "WGU",
+        "display": "Whanganui",
+        "aliases": ("Whanganui",),
+    },
+    {
+        "code": "GSB",
+        "display": "Gisborne",
+        "aliases": ("Gisborne",),
+    },
+    {
+        "code": "CHC",
+        "display": "Christchurch",
+        "aliases": ("Christchurch",),
+    },
+    {
+        "code": "DUD",
+        "display": "Dunedin",
+        "aliases": ("Dunedin",),
+    },
+]
+
+
+def _ordered_groups(group_key):
+    groups = {}
+    for spec in NON_AUCKLAND_STATION_SPECS:
+        if group_key == "forecast_group" and not spec.get("include_in_forecast", True):
+            continue
+        group_name = spec.get(group_key, spec["code"])
+        groups.setdefault(group_name, []).append(spec["code"])
+    return [tuple(codes) for codes in groups.values()]
+
+
+def _message_station_groups():
+    groups = {}
+    for spec in NON_AUCKLAND_STATION_SPECS:
+        group_name = spec.get("message_group", spec["code"])
+        station_names = [spec["code"], *spec.get("aliases", ())]
+        target = groups.setdefault(group_name, [])
+        for station_name in station_names:
+            normalized = station_name.upper()
+            if normalized not in target:
+                target.append(normalized)
+    return {name: tuple(stations) for name, stations in groups.items()}
+
+
+NON_AUCKLAND_STATIONS = [spec["code"] for spec in NON_AUCKLAND_STATION_SPECS]
+BOARD_FORECAST_GROUPS = _ordered_groups("forecast_group")
+STATION_ALIASES = {
+    spec["code"]: [spec["code"], *spec.get("aliases", ())]
+    for spec in NON_AUCKLAND_STATION_SPECS
+}
+STATION_DISPLAY_ALIASES = {
+    spec["code"]: spec["display"]
+    for spec in NON_AUCKLAND_STATION_SPECS
+    if spec.get("display")
+}
+PROVINCE_STATIONS_BY_MESSAGE = _message_station_groups()
+
+
 # Supplier route groups are explicit business rules.  Never infer them from a
 # shared numeric prefix: related route codes can belong to different suppliers
 # or drivers (for example, 501C belongs to PANDA, not EMPIRE COURIER's 501 group).

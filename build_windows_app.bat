@@ -41,7 +41,7 @@ for %%I in ("%PYTHON_EXE%") do set "PYTHON_HOME=%%~dpI"
   --hidden-import update_report_data ^
   --hidden-import build_message_pack ^
   --hidden-import send_lark_images ^
-  --add-data "当日数据统计_20260603_233359_公式版.xlsx;." ^
+  --add-data "当日数据统计_模板.xlsx;." ^
   --add-data "lark_bot_config.example.json;." ^
   --add-data "wecom_download_config.example.json;." ^
   imile_report_win32.py
@@ -52,7 +52,7 @@ if errorlevel 1 (
   exit /b %errorlevel%
 )
 
-copy /Y "当日数据统计_20260603_233359_公式版.xlsx" "dist\iMileReportAssistant\" >nul
+copy /Y "当日数据统计_模板.xlsx" "dist\iMileReportAssistant\" >nul
 copy /Y "lark_bot_config.example.json" "dist\iMileReportAssistant\" >nul
 copy /Y "wecom_download_config.example.json" "dist\iMileReportAssistant\" >nul
 copy /Y "BOT_SETUP.md" "dist\iMileReportAssistant\" >nul

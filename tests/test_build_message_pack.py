@@ -1,5 +1,7 @@
 import unittest
 from unittest import mock
+from pathlib import Path
+import tempfile
 
 import pandas as pd
 
@@ -7,6 +9,26 @@ import build_message_pack
 
 
 class BuildMessagePackTests(unittest.TestCase):
+    def test_report_resolution_uses_only_the_explicit_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+            canonical = folder / "当日数据统计.xlsx"
+            newer_snapshot = folder / "当日数据统计_20990101_000000.xlsx"
+            canonical.touch()
+            newer_snapshot.touch()
+
+            with mock.patch.object(build_message_pack, "DEFAULT_REPORT_FILE", canonical):
+                selected = build_message_pack.resolve_report_file()
+
+        self.assertEqual(selected, canonical)
+
+    def test_missing_explicit_report_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing = Path(temp_dir) / "missing.xlsx"
+
+            with self.assertRaisesRegex(FileNotFoundError, "Report workbook not found"):
+                build_message_pack.resolve_report_file(missing)
+
     def test_goose_keeps_all_routes_separate(self):
         group = pd.DataFrame(
             [["407", 51, "Goose"], ["408", 39, "Goose"], ["408A", 0, "Goose"]],
@@ -380,7 +402,7 @@ class BuildMessagePackTests(unittest.TestCase):
         )
 
     def test_board_forecast_tables_follow_their_headers_after_expansion(self):
-        frame = pd.DataFrame([[""] * 9 for _ in range(30)], dtype=object)
+        frame = pd.DataFrame([[""] * 9 for _ in range(36)], dtype=object)
         stations = [
             "HMT",
             "TRG/RTR",
@@ -391,10 +413,14 @@ class BuildMessagePackTests(unittest.TestCase):
             "NPMV2",
             "WGU",
             "GSB",
+            "CHC",
+            "DUD",
             "总计",
         ]
-        frame.iloc[1, 7:9] = [200, "3L预测板数"]
-        frame.iloc[13, 7:9] = [350, "5L预测板数"]
+        header_3l_row = 1
+        header_5l_row = header_3l_row + len(stations) + 2
+        frame.iloc[header_3l_row, 7:9] = [200, "3L预测板数"]
+        frame.iloc[header_5l_row, 7:9] = [350, "5L预测板数"]
         board_values = [
             1,
             "2/3(5)",
@@ -406,10 +432,12 @@ class BuildMessagePackTests(unittest.TestCase):
             10,
             11,
             12,
+            13,
+            14,
         ]
         for index, station in enumerate(stations):
-            frame.iloc[2 + index, 7:9] = [station, board_values[index]]
-            frame.iloc[14 + index, 7:9] = [station, board_values[index]]
+            frame.iloc[header_3l_row + 1 + index, 7:9] = [station, board_values[index]]
+            frame.iloc[header_5l_row + 1 + index, 7:9] = [station, board_values[index]]
 
         board_3l, base_3l = build_message_pack.extract_board_forecast_table(
             frame,
@@ -432,6 +460,10 @@ class BuildMessagePackTests(unittest.TestCase):
     def test_gisborne_text_route_code_is_kept(self):
         self.assertTrue(build_message_pack.is_route_code("GSB"))
         self.assertIn("GSB", build_message_pack.PROVINCE_STATIONS_BY_MESSAGE)
+
+    def test_new_south_island_cities_get_route_images(self):
+        self.assertEqual(build_message_pack.PROVINCE_STATIONS_BY_MESSAGE["CHC"], ("CHC", "CHRISTCHURCH"))
+        self.assertEqual(build_message_pack.PROVINCE_STATIONS_BY_MESSAGE["DUD"], ("DUD", "DUNEDIN"))
 
     def test_non_auckland_image_accepts_the_workbook_board_capacity(self):
         overview = pd.DataFrame(

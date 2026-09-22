@@ -148,6 +148,8 @@ class CenterWaybillFreshnessTests(unittest.TestCase):
             update_module = mock.Mock()
             build_module = mock.Mock()
             sender_module = mock.Mock()
+            generated_report = app_dir / "当日数据统计_20260820_120000.xlsx"
+            update_module.main.return_value = generated_report
             sender_argv = []
             sender_module.main.side_effect = lambda: sender_argv.append(app_workflows.sys.argv[:])
 
@@ -177,7 +179,7 @@ class CenterWaybillFreshnessTests(unittest.TestCase):
             target = app_dir / "中心运单查询.xlsx"
             self.assertEqual(target.read_bytes(), b"selected workbook")
             update_module.main.assert_called_once_with(target, allow_old_source=True)
-            build_module.main.assert_called_once_with()
+            build_module.main.assert_called_once_with(generated_report)
             sender_module.main.assert_called_once_with()
             configured.assert_called_once_with(send_as="webhook")
             self.assertEqual(
@@ -220,6 +222,31 @@ class CenterWaybillFreshnessTests(unittest.TestCase):
 
         self.assertNotIn("--allow-old-source", normal_update)
         self.assertIn("--allow-old-source", override_update)
+
+    def test_daily_workflow_passes_the_exact_generated_report_to_image_builder(self):
+        report_file = Path("output") / "当日数据统计_20260820_120000.xlsx"
+
+        steps = run_daily_report.build_steps("app", report_file=report_file)
+
+        self.assertIn("--result-path-file", steps[0][1])
+        self.assertEqual(
+            steps[1][1],
+            [
+                run_daily_report.sys.executable,
+                "build_message_pack.py",
+                "--report-file",
+                str(report_file),
+            ],
+        )
+
+    def test_daily_workflow_can_build_without_a_send_step(self):
+        steps = run_daily_report.build_steps("app", send=False)
+
+        self.assertEqual(
+            [label for label, _ in steps],
+            ["Update workbook", "Build message pack"],
+        )
+        self.assertNotIn("send_lark_images.py", [part for _, command in steps for part in command])
 
 
 if __name__ == "__main__":

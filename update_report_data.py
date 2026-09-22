@@ -11,12 +11,19 @@ from copy import copy
 import pandas as pd
 from openpyxl import load_workbook
 
-from report_config import BOARD_3L_CAPACITY, BOARD_5L_CAPACITY
+from report_config import (
+    BOARD_3L_CAPACITY,
+    BOARD_5L_CAPACITY,
+    BOARD_FORECAST_GROUPS,
+    NON_AUCKLAND_STATIONS,
+    STATION_ALIASES,
+    STATION_DISPLAY_ALIASES,
+)
 from report_source_freshness import center_waybill_file_freshness_warning
 
 
 SOURCE_PATTERN = "*中心运单查询*.xlsx"
-TEMPLATE_PATTERN = "当日数据统计*.xlsx"
+TEMPLATE_FILE = Path("当日数据统计_模板.xlsx")
 OUTPUT_FILE = Path("当日数据统计.xlsx")
 today = datetime.now()
 REPORT_DATE = f"{today.month}月{today.day:02d}日"
@@ -50,52 +57,11 @@ MERCHANT_CODES = {
 CAINIAO_MERCHANT_CODE = MERCHANT_CODES["CAINIAO"]
 SUNYOU_MERCHANT_CODE = MERCHANT_CODES["SUNYOU"]
 
-NON_AUCKLAND_STATIONS = [
-    "HMT",
-    "TRG",
-    "RTR",
-    "TPO",
-    "NPL",
-    "HST",
-    "PMN",
-    "WLTV2",
-    "WGR",
-    "NPMV2",
-    "WGU",
-    "GSB",
-]
-BOARD_FORECAST_GROUPS = [
-    ("HMT",),
-    ("TRG", "RTR"),
-    ("TPO",),
-    ("NPL", "HST"),
-    ("PMN",),
-    ("WLTV2",),
-    ("NPMV2",),
-    ("WGU",),
-    ("GSB",),
-]
 BOARD_FORECAST_STATIONS = [
     station
     for group in BOARD_FORECAST_GROUPS
     for station in group
 ]
-STATION_ALIASES = {
-    "WLTV2": ["WLTV2", "WLT", "AKL-DC"],
-    "PMN": ["PMN", "PMNV2", "Palmerston NorthV2"],
-    "NPMV2": ["NPMV2", "New PlymouthV2"],
-    "WGU": ["WGU", "Whanganui"],
-    "GSB": ["GSB", "Gisborne"],
-}
-STATION_DISPLAY_ALIASES = {
-    "HMT": "Hamilton",
-    "TRG": "Tauranga",
-    "NPL": "Napier",
-    "RTR": " Rotorua",
-    "NPMV2": "New PlymouthV2",
-    "WGU": "Whanganui",
-    "GSB": "Gisborne",
-}
 AUCKLAND_ROUTE_SUPPLIERS = {
     "404A": "Feng",
     "501C": "PANDA",
@@ -179,19 +145,10 @@ def find_latest_source_file():
     raise ValueError(f"No valid source file found matching {SOURCE_PATTERN}. {details}")
 
 
-def find_latest_template_file():
-    canonical_template = Path("当日数据统计_20260603_233359_公式版.xlsx")
-    if canonical_template.exists():
-        return canonical_template
-
-    files = [
-        path
-        for path in Path(".").glob(TEMPLATE_PATTERN)
-        if not path.name.startswith("~$") and not re.search(r"_\d{8}_\d{6}\.xlsx$", path.name)
-    ]
-    if not files:
-        raise FileNotFoundError(f"No template file found matching {TEMPLATE_PATTERN}")
-    return max(files, key=lambda path: path.stat().st_mtime)
+def find_template_file():
+    if not TEMPLATE_FILE.exists():
+        raise FileNotFoundError(f"Report template not found: {TEMPLATE_FILE}")
+    return TEMPLATE_FILE
 
 
 def read_source_xlsx(path):
@@ -937,7 +894,7 @@ def main(source_file=None, allow_old_source=False):
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        template_file = find_latest_template_file()
+        template_file = find_template_file()
         print(f"Using template file: {template_file}")
         wb = load_workbook(template_file, keep_links=False)
 
@@ -984,9 +941,12 @@ def main(source_file=None, allow_old_source=False):
         f"Sunyou={merchant_counts.get(MERCHANT_CODES['SUNYOU'], 0)}"
     )
     if not overlap.empty:
-        print("Potential double-count rows:")
-        print(overlap[REQUIRED_COLUMNS].to_string(index=False))
+        print(
+            "Potential double-count rows: "
+            f"{len(overlap)} (waybill details omitted from logs)"
+        )
     print(f"Done: {output_file}")
+    return output_file
 
 
 def get_auckland_route_codes(wb):
@@ -1007,5 +967,16 @@ if __name__ == "__main__":
         action="store_true",
         help="Allow a center waybill query file whose modified date is not today",
     )
+    parser.add_argument(
+        "--result-path-file",
+        help="Write the generated report path here for the calling workflow",
+    )
     args = parser.parse_args()
-    main(args.source_file, allow_old_source=args.allow_old_source)
+    generated_report = main(args.source_file, allow_old_source=args.allow_old_source)
+    if args.result_path_file:
+        result_path_file = Path(args.result_path_file)
+        result_path_file.parent.mkdir(parents=True, exist_ok=True)
+        result_path_file.write_text(
+            str(generated_report.resolve()),
+            encoding="utf-8",
+        )
