@@ -12,7 +12,7 @@ import pandas as pd
 from openpyxl import load_workbook
 
 from report_config import (
-    BOARD_3L_CAPACITY,
+    BOARD_4L_CAPACITY,
     BOARD_5L_CAPACITY,
     BOARD_FORECAST_GROUPS,
     NON_AUCKLAND_STATIONS,
@@ -725,8 +725,9 @@ def set_board_row_height(ws, row, height):
 
 
 def find_board_header_row(ws, title, fallback):
+    titles = {title} if isinstance(title, str) else set(title)
     for row in range(1, ws.max_row + 1):
-        if clean_text(ws.cell(row, 9).value) == title:
+        if clean_text(ws.cell(row, 9).value) in titles:
             return row
     return fallback
 
@@ -740,16 +741,16 @@ def find_board_total_row(ws, header_row, fallback):
 
 def board_forecast_layout():
     group_count = len(BOARD_FORECAST_GROUPS)
-    header_3l_row = 1
-    rows_3l = {
+    header_4l_row = 1
+    rows_4l = {
         row: group
         for row, group in enumerate(
             BOARD_FORECAST_GROUPS,
-            start=header_3l_row + 1,
+            start=header_4l_row + 1,
         )
     }
-    total_3l_row = header_3l_row + 1 + group_count
-    header_5l_row = total_3l_row + 2
+    total_4l_row = header_4l_row + 1 + group_count
+    header_5l_row = total_4l_row + 2
     rows_5l = {
         row: group
         for row, group in enumerate(
@@ -759,9 +760,9 @@ def board_forecast_layout():
     }
     total_5l_row = header_5l_row + 1 + group_count
     return (
-        header_3l_row,
-        rows_3l,
-        total_3l_row,
+        header_4l_row,
+        rows_4l,
+        total_4l_row,
         header_5l_row,
         rows_5l,
         total_5l_row,
@@ -772,11 +773,15 @@ def write_board_forecast_values(ws):
     # Snapshot the legacy/current table styles and 5L capacity before moving
     # either section.  Grouped rows can move the 5L table upward, so avoid
     # fixed row assumptions when rewriting the two board sections.
-    old_3l_header_row = find_board_header_row(ws, "3L预测板数", 2)
-    old_5l_header_row = find_board_header_row(ws, "5L预测板数", 13)
-    old_3l_total_row = find_board_total_row(
+    old_4l_header_row = find_board_header_row(
         ws,
-        old_3l_header_row,
+        ("4L预测板数", "3L预测板数"),
+        2,
+    )
+    old_5l_header_row = find_board_header_row(ws, "5L预测板数", 13)
+    old_4l_total_row = find_board_total_row(
+        ws,
+        old_4l_header_row,
         old_5l_header_row - 2,
     )
     old_5l_total_row = find_board_total_row(
@@ -785,26 +790,26 @@ def write_board_forecast_values(ws):
         old_5l_header_row + 9,
     )
     styles = {
-        "3l_header": snapshot_board_row_style(ws, old_3l_header_row),
-        "3l_data": snapshot_board_row_style(ws, old_3l_header_row + 1),
-        "3l_total": snapshot_board_row_style(ws, old_3l_total_row),
-        "gap": snapshot_board_row_style(ws, old_3l_total_row + 1),
+        "4l_header": snapshot_board_row_style(ws, old_4l_header_row),
+        "4l_data": snapshot_board_row_style(ws, old_4l_header_row + 1),
+        "4l_total": snapshot_board_row_style(ws, old_4l_total_row),
+        "gap": snapshot_board_row_style(ws, old_4l_total_row + 1),
         "5l_header": snapshot_board_row_style(ws, old_5l_header_row),
         "5l_data": snapshot_board_row_style(ws, old_5l_header_row + 1),
         "5l_total": snapshot_board_row_style(ws, old_5l_total_row),
     }
-    height_3l = ws.row_dimensions[old_3l_header_row + 1].height
+    height_4l = ws.row_dimensions[old_4l_header_row + 1].height
     height_5l_candidates = [
         ws.row_dimensions[row].height
-        for row in (old_3l_total_row, old_5l_header_row, old_5l_header_row + 1)
+        for row in (old_4l_total_row, old_5l_header_row, old_5l_header_row + 1)
         if ws.row_dimensions[row].height is not None
     ]
     height_5l = max(height_5l_candidates) if height_5l_candidates else None
 
     (
-        header_3l_row,
-        rows_3l,
-        total_3l_row,
+        header_4l_row,
+        rows_4l,
+        total_4l_row,
         header_5l_row,
         rows_5l,
         total_5l_row,
@@ -819,7 +824,7 @@ def write_board_forecast_values(ws):
     ws.column_dimensions["I"].width = max(ws.column_dimensions["I"].width or 0, 24)
 
     base_5l = ws.cell(old_5l_header_row, 8).value or BOARD_5L_CAPACITY
-    base_3l = BOARD_3L_CAPACITY
+    base_4l = BOARD_4L_CAPACITY
 
     total_row = find_total_row(ws, column=1)
     arrival_by_station = {
@@ -831,29 +836,29 @@ def write_board_forecast_values(ws):
         ws.cell(row, 8).value = None
         ws.cell(row, 9).value = None
 
-    apply_board_row_style(ws, header_3l_row, styles["3l_header"])
-    ws.cell(header_3l_row, 8).value = base_3l
-    ws.cell(header_3l_row, 9).value = "3L预测板数"
+    apply_board_row_style(ws, header_4l_row, styles["4l_header"])
+    ws.cell(header_4l_row, 8).value = base_4l
+    ws.cell(header_4l_row, 9).value = "4L预测板数"
 
-    total_3l_forecast = 0
-    for row, group in rows_3l.items():
-        apply_board_row_style(ws, row, styles["3l_data"])
-        set_board_row_height(ws, row, height_3l)
+    total_4l_forecast = 0
+    for row, group in rows_4l.items():
+        apply_board_row_style(ws, row, styles["4l_data"])
+        set_board_row_height(ws, row, height_4l)
         forecast, group_total = board_group_forecast(
             arrival_by_station,
             group,
-            base_3l,
+            base_4l,
         )
         ws.cell(row, 8).value = "/".join(group)
         ws.cell(row, 9).value = forecast
-        total_3l_forecast += group_total
+        total_4l_forecast += group_total
 
-    apply_board_row_style(ws, total_3l_row, styles["3l_total"])
-    set_board_row_height(ws, total_3l_row, height_3l)
-    ws.cell(total_3l_row, 8).value = "总计"
-    ws.cell(total_3l_row, 9).value = round_excel(total_3l_forecast)
+    apply_board_row_style(ws, total_4l_row, styles["4l_total"])
+    set_board_row_height(ws, total_4l_row, height_4l)
+    ws.cell(total_4l_row, 8).value = "总计"
+    ws.cell(total_4l_row, 9).value = round_excel(total_4l_forecast)
 
-    gap_row = total_3l_row + 1
+    gap_row = total_4l_row + 1
     apply_board_row_style(ws, gap_row, styles["gap"])
 
     apply_board_row_style(ws, header_5l_row, styles["5l_header"])

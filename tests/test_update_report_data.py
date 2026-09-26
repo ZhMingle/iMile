@@ -124,7 +124,7 @@ class UpdateReportDataTests(unittest.TestCase):
         self.assertEqual(worksheet.cell(3, 3).value, 4)
         self.assertEqual(worksheet.cell(3, 7).value, "PANDA")
 
-    def test_3l_board_forecast_uses_200_piece_capacity(self):
+    def test_4l_board_forecast_uses_280_piece_capacity_and_migrates_legacy_header(self):
         workbook = Workbook()
         worksheet = workbook.active
         arrivals = {
@@ -162,17 +162,18 @@ class UpdateReportDataTests(unittest.TestCase):
 
         self.assertEqual(worksheet.column_dimensions["H"].width, 16)
         self.assertEqual(worksheet.column_dimensions["I"].width, 24)
-        self.assertEqual(worksheet.cell(1, 8).value, 200)
+        self.assertEqual(worksheet.cell(1, 8).value, 280)
+        self.assertEqual(worksheet.cell(1, 9).value, "4L预测板数")
         self.assertEqual(
             [worksheet.cell(row, 8).value for row in range(2, 13)],
             ["HMT", "TRG/RTR", "TPO", "NPL/HST", "PMN", "WLTV2", "NPMV2", "WGU", "GSB", "CHC", "DUD"],
         )
         self.assertEqual(
             [worksheet.cell(row, 9).value for row in range(2, 13)],
-            [7.85, "5.95/2.2(8.15)", 1.0, "2.47/1.73(4.2)", 3.4, 7.87, 0.97, 0.83, 0.44, 1.26, 0.27],
+            [5.61, "4.25/1.57(5.82)", 0.72, "1.76/1.23(2.99)", 2.42, 5.62, 0.7, 0.59, 0.31, 0.9, 0.19],
         )
         self.assertEqual(worksheet.cell(13, 8).value, "总计")
-        self.assertEqual(worksheet.cell(13, 9).value, 36.24)
+        self.assertEqual(worksheet.cell(13, 9).value, 25.87)
         self.assertEqual(
             [worksheet.row_dimensions[row].height for row in range(2, 14)],
             [18] * 12,
@@ -302,19 +303,20 @@ class UpdateReportDataTests(unittest.TestCase):
             "当天总量（奥克兰 + 外省 + 未分配）",
         )
         self.assertEqual(worksheet.cell(summary_value_row, 6).value, "16348(7268+9078+2)")
-        self.assertEqual(worksheet.cell(1, 8).value, 200)
-        _, rows_3l, total_3l_row, header_5l_row, rows_5l, total_5l_row = (
+        self.assertEqual(worksheet.cell(1, 8).value, 280)
+        self.assertEqual(worksheet.cell(1, 9).value, "4L预测板数")
+        _, rows_4l, total_4l_row, header_5l_row, rows_5l, total_5l_row = (
             update_report_data.board_forecast_layout()
         )
         expected_board_labels = [
             "/".join(group) for group in update_report_data.BOARD_FORECAST_GROUPS
         ]
         self.assertEqual(
-            [worksheet.cell(row, 8).value for row in rows_3l],
+            [worksheet.cell(row, 8).value for row in rows_4l],
             expected_board_labels,
         )
-        self.assertEqual(worksheet.cell(total_3l_row, 8).value, "总计")
-        self.assertIsNone(worksheet.cell(total_3l_row + 1, 8).value)
+        self.assertEqual(worksheet.cell(total_4l_row, 8).value, "总计")
+        self.assertIsNone(worksheet.cell(total_4l_row + 1, 8).value)
         self.assertEqual(worksheet.cell(header_5l_row, 8).value, 350)
         self.assertEqual(worksheet.cell(header_5l_row, 9).value, "5L预测板数")
         self.assertEqual(

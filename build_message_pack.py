@@ -8,7 +8,7 @@ from openpyxl import load_workbook
 from PIL import Image, ImageDraw, ImageFont
 
 from report_config import (
-    BOARD_3L_CAPACITY,
+    BOARD_4L_CAPACITY,
     BOARD_5L_CAPACITY,
     PROVINCE_STATIONS_BY_MESSAGE,
     SUPPLIER_ROUTE_GROUPS,
@@ -369,9 +369,9 @@ def render_side_by_side_route_image(path, tables):
 def render_non_auckland_overview(
     path,
     overview,
-    board_3l,
+    board_4l,
     board_5l,
-    base_3l,
+    base_4l,
     base_5l,
     aliexpress_count,
     sunyou_count,
@@ -392,9 +392,9 @@ def render_non_auckland_overview(
     main_end_y = main_summary_y + header_h + max(cell_h, total_value_h)
     # Keep the board panel flush with the top edge; the main title remains in
     # the wider left panel while the board forecast starts on the first row.
-    board_3l_y = 0
-    board_3l_height = header_h + cell_h * len(board_3l)
-    board_5l_y = board_3l_y + board_3l_height + gap
+    board_4l_y = 0
+    board_4l_height = header_h + cell_h * len(board_4l)
+    board_5l_y = board_4l_y + board_4l_height + gap
     board_5l_height = header_h + cell_h * len(board_5l)
     side_end_y = board_5l_y + board_5l_height
     height = max(main_end_y, side_end_y) + gap
@@ -465,9 +465,9 @@ def render_non_auckland_overview(
             y += cell_h
 
     side_x = main_w + gap
-    board_3l_img = board_3l.copy()
-    board_3l_img["base"] = base_3l
-    draw_board_table(side_x, board_3l_y, "3L预测板数", board_3l_img)
+    board_4l_img = board_4l.copy()
+    board_4l_img["base"] = base_4l
+    draw_board_table(side_x, board_4l_y, "4L预测板数", board_4l_img)
 
     board_5l_img = board_5l.copy()
     board_5l_img["base"] = base_5l
@@ -520,10 +520,10 @@ def build_non_auckland_messages(report_file):
     overview["cainiao_volume"] = overview["cainiao_volume"].map(clean_number)
     overview["sunyou_volume"] = overview["sunyou_volume"].map(clean_number)
 
-    board_3l, base_3l = extract_board_forecast_table(
+    board_4l, base_4l = extract_board_forecast_table(
         df,
-        "3L预测板数",
-        BOARD_3L_CAPACITY,
+        "4L预测板数",
+        BOARD_4L_CAPACITY,
     )
     board_5l, base_5l = extract_board_forecast_table(
         df,
@@ -551,9 +551,9 @@ def build_non_auckland_messages(report_file):
     render_non_auckland_overview(
         PROVINCE_DIR / "非奥克兰总览.png",
         overview,
-        board_3l,
+        board_4l,
         board_5l,
-        base_3l,
+        base_4l,
         base_5l,
         aliexpress_count,
         sunyou_count,

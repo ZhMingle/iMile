@@ -267,7 +267,7 @@ AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST, NPMV2, WGU, GSB, CHC, DUD
 - 路由码或派件网点为空的运单不会分摊到任何网点，而是在当天总量中单独显示为“未分配”
 - `商家编号` 用于区分 TEMU、菜鸟、顺友等渠道；菜鸟相关统计按菜鸟商家编号计算，不再按运单号 `36` 开头猜测
 
-非奥克兰城市统一维护在 `report_config.py` 的 `NON_AUCKLAND_STATION_SPECS`。新增一个独立城市时，通常只需在那里增加一条站点配置；日报行、3L/5L 预测板数、线路预测图片和桌面助手线路识别会自动同步，不再分别修改多个脚本。
+非奥克兰城市统一维护在 `report_config.py` 的 `NON_AUCKLAND_STATION_SPECS`。新增一个独立城市时，通常只需在那里增加一条站点配置；日报行、4L/5L 预测板数、线路预测图片和桌面助手线路识别会自动同步，不再分别修改多个脚本。
 
 #### 最终结果文件
 
@@ -745,7 +745,7 @@ Rules:
 - Rows with a blank route or delivery station are not allocated to any station; they appear once as **Unassigned** in the daily total
 - `商家编号` / merchant ID is used to distinguish TEMU, Cainiao, Sunyou, and other channels. Cainiao-related metrics are calculated by Cainiao merchant ID, no longer by guessing from waybill numbers starting with `36`.
 
-Non-Auckland cities are defined once in `NON_AUCKLAND_STATION_SPECS` in `report_config.py`. Adding a standalone city there automatically updates the workbook rows, 3L/5L forecasts, route-detail image generation, and desktop route matching.
+Non-Auckland cities are defined once in `NON_AUCKLAND_STATION_SPECS` in `report_config.py`. Adding a standalone city there automatically updates the workbook rows, 4L/5L forecasts, route-detail image generation, and desktop route matching.
 
 #### Final result workbook
 

@@ -417,9 +417,9 @@ class BuildMessagePackTests(unittest.TestCase):
             "DUD",
             "总计",
         ]
-        header_3l_row = 1
-        header_5l_row = header_3l_row + len(stations) + 2
-        frame.iloc[header_3l_row, 7:9] = [200, "3L预测板数"]
+        header_4l_row = 1
+        header_5l_row = header_4l_row + len(stations) + 2
+        frame.iloc[header_4l_row, 7:9] = [280, "4L预测板数"]
         frame.iloc[header_5l_row, 7:9] = [350, "5L预测板数"]
         board_values = [
             1,
@@ -436,13 +436,13 @@ class BuildMessagePackTests(unittest.TestCase):
             14,
         ]
         for index, station in enumerate(stations):
-            frame.iloc[header_3l_row + 1 + index, 7:9] = [station, board_values[index]]
+            frame.iloc[header_4l_row + 1 + index, 7:9] = [station, board_values[index]]
             frame.iloc[header_5l_row + 1 + index, 7:9] = [station, board_values[index]]
 
-        board_3l, base_3l = build_message_pack.extract_board_forecast_table(
+        board_4l, base_4l = build_message_pack.extract_board_forecast_table(
             frame,
-            "3L预测板数",
-            200,
+            "4L预测板数",
+            280,
         )
         board_5l, base_5l = build_message_pack.extract_board_forecast_table(
             frame,
@@ -450,11 +450,11 @@ class BuildMessagePackTests(unittest.TestCase):
             350,
         )
 
-        self.assertEqual(board_3l["station"].tolist(), stations)
+        self.assertEqual(board_4l["station"].tolist(), stations)
         self.assertEqual(board_5l["station"].tolist(), stations)
-        self.assertEqual(board_3l["boards"].tolist(), board_values)
+        self.assertEqual(board_4l["boards"].tolist(), board_values)
         self.assertEqual(board_5l["boards"].tolist(), board_values)
-        self.assertEqual(base_3l, 200)
+        self.assertEqual(base_4l, 280)
         self.assertEqual(base_5l, 350)
 
     def test_gisborne_text_route_code_is_kept(self):
@@ -470,11 +470,11 @@ class BuildMessagePackTests(unittest.TestCase):
             [["总计", 0, 0, 0]],
             columns=["station", "arrival_volume", "cainiao_volume", "sunyou_volume"],
         )
-        board_3l = pd.DataFrame(
+        board_4l = pd.DataFrame(
             [["总计", 0]],
             columns=["station", "boards"],
         )
-        board_5l = board_3l.copy()
+        board_5l = board_4l.copy()
 
         captured = []
         original = build_message_pack.draw_centered_text
@@ -487,9 +487,9 @@ class BuildMessagePackTests(unittest.TestCase):
             build_message_pack.render_non_auckland_overview(
                 self.temp_path,
                 overview,
-                board_3l,
+                board_4l,
                 board_5l,
-                200,
+                280,
                 350,
                 0,
                 0,
@@ -501,7 +501,10 @@ class BuildMessagePackTests(unittest.TestCase):
         finally:
             build_message_pack.draw_centered_text = original
 
-        self.assertIn(200, captured)
+        self.assertIn(280, captured)
+        self.assertIn("4L预测板数", captured)
+        self.assertNotIn(200, captured)
+        self.assertNotIn("3L预测板数", captured)
 
     def test_non_auckland_image_grows_for_expanded_board_tables(self):
         overview_stations = [
@@ -544,7 +547,7 @@ class BuildMessagePackTests(unittest.TestCase):
             overview,
             boards,
             boards,
-            200,
+            280,
             350,
             0,
             0,
