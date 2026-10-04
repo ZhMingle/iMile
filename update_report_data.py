@@ -17,7 +17,10 @@ from report_config import (
     BOARD_FORECAST_GROUPS,
     NON_AUCKLAND_STATIONS,
     STATION_ALIASES,
+    STATION_CODES_BY_OVERVIEW_LABEL,
     STATION_DISPLAY_ALIASES,
+    STATION_OVERVIEW_GROUPS,
+    STATION_OVERVIEW_LABELS,
 )
 from report_source_freshness import center_waybill_file_freshness_warning
 
@@ -350,6 +353,45 @@ def station_count_with_display_alias(counts, station, display_alias):
     return sum(counts.get(key, 0) for key in keys)
 
 
+def station_overview_count(counts, station, display_alias):
+    total = station_count_with_display_alias(counts, station, display_alias)
+    groups = STATION_OVERVIEW_GROUPS.get(station)
+    if not groups:
+        return total, total
+
+    group_counts = []
+    covered_keys = set()
+    for group in groups:
+        keys = {clean_text(value) for value in group if clean_text(value)}
+        covered_keys.update(keys)
+        group_counts.append(sum(counts.get(key, 0) for key in keys))
+
+    all_keys = {
+        clean_text(value)
+        for value in [*STATION_ALIASES.get(station, [station]), display_alias]
+        if clean_text(value)
+    }
+    group_counts[0] += sum(
+        counts.get(key, 0)
+        for key in all_keys - covered_keys
+    )
+    display = "/".join(str(value) for value in group_counts)
+    return f"{display}({total})", total
+
+
+def station_display_total(value):
+    if isinstance(value, (int, float)):
+        return value
+    text = clean_text(value)
+    grouped_total = re.search(r"\((-?\d+(?:\.\d+)?)\)\s*$", text)
+    candidate = grouped_total.group(1) if grouped_total else text
+    try:
+        number = float(candidate)
+    except ValueError:
+        return 0
+    return int(number) if number.is_integer() else number
+
+
 def auckland_route_counts(df):
     return Counter(
         df.loc[df["派件网点简码"].eq("AKL"), "路由码"]
@@ -414,6 +456,7 @@ def ensure_non_auckland_station_rows(ws):
     existing_station_values = {}
     for row in range(3, current_total_row):
         station = clean_text(ws.cell(row, 1).value)
+        station = STATION_CODES_BY_OVERVIEW_LABEL.get(station, station)
         if station == "WLT":
             station = "WLTV2"
         if station:
@@ -467,7 +510,7 @@ def ensure_non_auckland_station_rows(ws):
         )
 
     for row, station in enumerate(NON_AUCKLAND_STATIONS, start=3):
-        ws.cell(row, 1).value = station
+        ws.cell(row, 1).value = STATION_OVERVIEW_LABELS.get(station, station)
         ws.cell(row, 2).value = STATION_DISPLAY_ALIASES.get(station)
         for col, value in zip(range(4, 6), existing_station_values.get(station, [None, None])):
             ws.cell(row, col).value = value
@@ -561,25 +604,33 @@ def update_non_auckland_sheet(
     summary_header_row = total_row + 1
     summary_value_row = total_row + 2
 
-    for row in range(3, total_row):
-        station = clean_text(ws.cell(row, 1).value)
+    arrival_by_station = {}
+    cainiao_by_station = {}
+    sunyou_by_station = {}
+    for row, station in enumerate(NON_AUCKLAND_STATIONS, start=3):
         alias = clean_text(ws.cell(row, 2).value)
 
-        arrival = station_count_with_display_alias(
+        arrival_display, arrival = station_overview_count(
             station_counts,
             station,
             alias,
         )
         if station == "RTR":
             arrival = sum(count for key, count in station_counts.items() if key.startswith("RTR"))
+            arrival_display = arrival
 
-        ws.cell(row, 3).value = arrival
-        ws.cell(row, 6).value = station_count(cainiao_counts, station)
-        ws.cell(row, 7).value = station_count(sunyou_counts, station)
+        cainiao = station_count(cainiao_counts, station)
+        sunyou = station_count(sunyou_counts, station)
+        arrival_by_station[station] = arrival
+        cainiao_by_station[station] = cainiao
+        sunyou_by_station[station] = sunyou
+        ws.cell(row, 3).value = arrival_display
+        ws.cell(row, 6).value = cainiao
+        ws.cell(row, 7).value = sunyou
 
-    non_auckland_total = sum(ws.cell(row, 3).value or 0 for row in range(3, total_row))
-    cainiao_total = sum(ws.cell(row, 6).value or 0 for row in range(3, total_row))
-    sunyou_total = sum(ws.cell(row, 7).value or 0 for row in range(3, total_row))
+    non_auckland_total = sum(arrival_by_station.values())
+    cainiao_total = sum(cainiao_by_station.values())
+    sunyou_total = sum(sunyou_by_station.values())
 
     ws.cell(total_row, 3).value = non_auckland_total
     ws.cell(total_row, 6).value = cainiao_total
@@ -598,7 +649,7 @@ def update_non_auckland_sheet(
         summary_value_row=summary_value_row,
     )
 
-    write_board_forecast_values(ws)
+    write_board_forecast_values(ws, arrival_by_station)
 
     return non_auckland_total
 
@@ -769,7 +820,7 @@ def board_forecast_layout():
     )
 
 
-def write_board_forecast_values(ws):
+def write_board_forecast_values(ws, arrival_by_station=None):
     # Snapshot the legacy/current table styles and 5L capacity before moving
     # either section.  Grouped rows can move the 5L table upward, so avoid
     # fixed row assumptions when rewriting the two board sections.
@@ -826,11 +877,15 @@ def write_board_forecast_values(ws):
     base_5l = ws.cell(old_5l_header_row, 8).value or BOARD_5L_CAPACITY
     base_4l = BOARD_4L_CAPACITY
 
-    total_row = find_total_row(ws, column=1)
-    arrival_by_station = {
-        clean_text(ws.cell(row, 1).value): ws.cell(row, 3).value or 0
-        for row in range(3, total_row)
-    }
+    if arrival_by_station is None:
+        total_row = find_total_row(ws, column=1)
+        arrival_by_station = {
+            STATION_CODES_BY_OVERVIEW_LABEL.get(
+                clean_text(ws.cell(row, 1).value),
+                clean_text(ws.cell(row, 1).value),
+            ): station_display_total(ws.cell(row, 3).value)
+            for row in range(3, total_row)
+        }
 
     for row in range(1, max(old_5l_total_row, total_5l_row) + 1):
         ws.cell(row, 8).value = None

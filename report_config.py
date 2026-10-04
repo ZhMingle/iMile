@@ -39,7 +39,11 @@ NON_AUCKLAND_STATION_SPECS = [
     {
         "code": "CHC",
         "display": "Christchurch",
-        "aliases": ("Christchurch",),
+        "aliases": ("CHCV2", "Christchurch"),
+        "overview_groups": (
+            ("CHC", "Christchurch"),
+            ("CHCV2",),
+        ),
     },
     {
         "code": "DUD",
@@ -82,6 +86,22 @@ STATION_DISPLAY_ALIASES = {
     spec["code"]: spec["display"]
     for spec in NON_AUCKLAND_STATION_SPECS
     if spec.get("display")
+}
+STATION_OVERVIEW_GROUPS = {
+    spec["code"]: tuple(tuple(group) for group in spec["overview_groups"])
+    for spec in NON_AUCKLAND_STATION_SPECS
+    if spec.get("overview_groups")
+}
+STATION_OVERVIEW_LABELS = {
+    spec["code"]: "/".join(
+        group[0] for group in STATION_OVERVIEW_GROUPS.get(spec["code"], ())
+    )
+    or spec["code"]
+    for spec in NON_AUCKLAND_STATION_SPECS
+}
+STATION_CODES_BY_OVERVIEW_LABEL = {
+    label: station
+    for station, label in STATION_OVERVIEW_LABELS.items()
 }
 PROVINCE_STATIONS_BY_MESSAGE = _message_station_groups()
 

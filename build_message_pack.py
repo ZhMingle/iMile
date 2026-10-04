@@ -516,7 +516,7 @@ def build_non_auckland_messages(report_file):
     overview = df.iloc[2 : total_row + 1, [0, 2, 5, 6]].copy()
     overview.columns = ["station", "arrival_volume", "cainiao_volume", "sunyou_volume"]
     overview["station"] = overview["station"].map(clean_text)
-    overview["arrival_volume"] = overview["arrival_volume"].map(clean_number)
+    overview["arrival_volume"] = overview["arrival_volume"].map(clean_board_value)
     overview["cainiao_volume"] = overview["cainiao_volume"].map(clean_number)
     overview["sunyou_volume"] = overview["sunyou_volume"].map(clean_number)
 

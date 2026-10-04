@@ -54,6 +54,22 @@ class UpdateReportDataTests(unittest.TestCase):
         self.assertEqual(update_report_data.station_count(counts, "NPMV2"), 205)
         self.assertEqual(update_report_data.station_count(counts, "PMN"), 770)
 
+    def test_christchurch_overview_groups_chc_and_chcv2_with_a_total(self):
+        counts = Counter({"CHC": 25, "CHCV2": 40})
+
+        self.assertEqual(
+            update_report_data.station_overview_count(
+                counts,
+                "CHC",
+                "Christchurch",
+            ),
+            ("25/40(65)", 65),
+        )
+        self.assertEqual(
+            update_report_data.station_display_total("25/40(65)"),
+            65,
+        )
+
     def test_auckland_route_counts_exclude_other_and_blank_stations(self):
         frame = pd.DataFrame(
             {
@@ -233,6 +249,8 @@ class UpdateReportDataTests(unittest.TestCase):
             ],
         )
         self.assertEqual(update_report_data.STATION_DISPLAY_ALIASES["CHC"], "Christchurch")
+        self.assertEqual(update_report_data.STATION_ALIASES["CHC"], ["CHC", "CHCV2", "Christchurch"])
+        self.assertEqual(update_report_data.STATION_OVERVIEW_LABELS["CHC"], "CHC/CHCV2")
         self.assertEqual(update_report_data.STATION_DISPLAY_ALIASES["DUD"], "Dunedin")
 
     def test_new_stations_move_summary_below_the_expanded_overview(self):
@@ -269,6 +287,7 @@ class UpdateReportDataTests(unittest.TestCase):
                 "WGU": 174,
                 "GSB": 123,
                 "CHC": 253,
+                "CHCV2": 71,
                 "DUD": 53,
             }
         )
@@ -281,19 +300,25 @@ class UpdateReportDataTests(unittest.TestCase):
             aliexpress_count=0,
             sunyou_count=0,
             auckland_total=7268,
-            source_total=16348,
+            source_total=16419,
         )
 
-        self.assertEqual(non_auckland_total, 9078)
+        self.assertEqual(non_auckland_total, 9149)
         total_row = 3 + len(update_report_data.NON_AUCKLAND_STATIONS)
         summary_header_row = total_row + 1
         summary_value_row = total_row + 2
         self.assertEqual(
             [worksheet.cell(row, 1).value for row in range(3, total_row)],
-            update_report_data.NON_AUCKLAND_STATIONS,
+            [
+                update_report_data.STATION_OVERVIEW_LABELS[station]
+                for station in update_report_data.NON_AUCKLAND_STATIONS
+            ],
         )
+        chc_row = 3 + update_report_data.NON_AUCKLAND_STATIONS.index("CHC")
+        self.assertEqual(worksheet.cell(chc_row, 1).value, "CHC/CHCV2")
+        self.assertEqual(worksheet.cell(chc_row, 3).value, "253/71(324)")
         self.assertEqual(worksheet.cell(total_row, 1).value, "总计")
-        self.assertEqual(worksheet.cell(total_row, 3).value, 9078)
+        self.assertEqual(worksheet.cell(total_row, 3).value, 9149)
         self.assertEqual(worksheet.cell(summary_header_row, 1).value, "Aliexpress 单量")
         self.assertEqual(worksheet.cell(summary_header_row, 3).value, "顺友单量")
         self.assertEqual(worksheet.cell(summary_header_row, 1).number_format, "@")
@@ -302,7 +327,7 @@ class UpdateReportDataTests(unittest.TestCase):
             worksheet.cell(summary_header_row, 6).value,
             "当天总量（奥克兰 + 外省 + 未分配）",
         )
-        self.assertEqual(worksheet.cell(summary_value_row, 6).value, "16348(7268+9078+2)")
+        self.assertEqual(worksheet.cell(summary_value_row, 6).value, "16419(7268+9149+2)")
         self.assertEqual(worksheet.cell(1, 8).value, 280)
         self.assertEqual(worksheet.cell(1, 9).value, "4L预测板数")
         _, rows_4l, total_4l_row, header_5l_row, rows_5l, total_5l_row = (

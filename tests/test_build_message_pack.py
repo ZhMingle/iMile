@@ -462,8 +462,17 @@ class BuildMessagePackTests(unittest.TestCase):
         self.assertIn("GSB", build_message_pack.PROVINCE_STATIONS_BY_MESSAGE)
 
     def test_new_south_island_cities_get_route_images(self):
-        self.assertEqual(build_message_pack.PROVINCE_STATIONS_BY_MESSAGE["CHC"], ("CHC", "CHRISTCHURCH"))
+        self.assertEqual(
+            build_message_pack.PROVINCE_STATIONS_BY_MESSAGE["CHC"],
+            ("CHC", "CHCV2", "CHRISTCHURCH"),
+        )
         self.assertEqual(build_message_pack.PROVINCE_STATIONS_BY_MESSAGE["DUD"], ("DUD", "DUNEDIN"))
+
+    def test_grouped_overview_count_keeps_the_breakdown_display(self):
+        self.assertEqual(
+            build_message_pack.clean_board_value("25/40(65)"),
+            "25/40(65)",
+        )
 
     def test_non_auckland_image_accepts_the_workbook_board_capacity(self):
         overview = pd.DataFrame(

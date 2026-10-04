@@ -257,14 +257,15 @@ output/query_list.txt
 常见派件网点简码包括：
 
 ```text
-AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST, NPMV2, WGU, GSB, CHC, DUD
+AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST, NPMV2, WGU, GSB, CHC, CHCV2, DUD
 ```
 
 其中：
 
 - `AKL` 用于奥克兰分单统计
 - 非 `AKL` 用于非奥克兰到件货量统计
-- 路由码或派件网点为空的运单不会分摊到任何网点，而是在当天总量中单独显示为“未分配”
+- 路由码、派件网点为空或站点代码未在配置中识别的运单不会分摊到任何网点，而是在当天总量中单独显示为“未分配”
+- `CHC` 与 `CHCV2` 在非奥克兰总览中合并为 `CHC/CHCV2` 一行，到件量按 `CHC数/CHCV2数(合计)` 显示
 - `商家编号` 用于区分 TEMU、菜鸟、顺友等渠道；菜鸟相关统计按菜鸟商家编号计算，不再按运单号 `36` 开头猜测
 
 非奥克兰城市统一维护在 `report_config.py` 的 `NON_AUCKLAND_STATION_SPECS`。新增一个独立城市时，通常只需在那里增加一条站点配置；日报行、4L/5L 预测板数、线路预测图片和桌面助手线路识别会自动同步，不再分别修改多个脚本。
@@ -735,14 +736,15 @@ The script picks the latest valid workbook. Required columns:
 Common station codes:
 
 ```text
-AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST, NPMV2, WGU, GSB, CHC, DUD
+AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST, NPMV2, WGU, GSB, CHC, CHCV2, DUD
 ```
 
 Rules:
 
 - `AKL` is used for Auckland dispatch statistics
 - Non-`AKL` rows are used for non-Auckland inbound statistics
-- Rows with a blank route or delivery station are not allocated to any station; they appear once as **Unassigned** in the daily total
+- Rows with a blank route, blank delivery station, or an unrecognized station code are not allocated to any station; they appear once as **Unassigned** in the daily total
+- `CHC` and `CHCV2` share one `CHC/CHCV2` row in the non-Auckland overview; arrival volume is shown as `CHC count/CHCV2 count (total)`
 - `商家编号` / merchant ID is used to distinguish TEMU, Cainiao, Sunyou, and other channels. Cainiao-related metrics are calculated by Cainiao merchant ID, no longer by guessing from waybill numbers starting with `36`.
 
 Non-Auckland cities are defined once in `NON_AUCKLAND_STATION_SPECS` in `report_config.py`. Adding a standalone city there automatically updates the workbook rows, 4L/5L forecasts, route-detail image generation, and desktop route matching.
