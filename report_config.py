@@ -39,12 +39,9 @@ NON_AUCKLAND_STATION_SPECS = [
     {
         "code": "CHC",
         "display": "Christchurch",
-        "aliases": ("CHCV2", "Christchurch"),
-        "overview_groups": (
-            ("CHC", "Christchurch"),
-            ("CHCV2",),
-        ),
+        "aliases": ("Christchurch",),
     },
+    {"code": "CHCV2"},
     {
         "code": "DUD",
         "display": "Dunedin",
@@ -119,8 +116,10 @@ SUPPLIER_ROUTE_GROUPS = {
         ("502", "502B", "502C"),
         ("504", "505", "506", "507", "508"),
     ],
-    "Fast Rabbit": [
+    "LIYANAGE LIMITED-DSP": [
         ("307", "307A", "307B"),
+    ],
+    "Goose": [
         ("308", "308A", "308B", "308C", "308D"),
     ],
     "Click'N Code": [

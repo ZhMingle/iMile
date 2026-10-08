@@ -66,6 +66,15 @@ BOARD_FORECAST_STATIONS = [
     for station in group
 ]
 AUCKLAND_ROUTE_SUPPLIERS = {
+    "304": "LIYANAGE LIMITED-DSP",
+    "307": "LIYANAGE LIMITED-DSP",
+    "307A": "LIYANAGE LIMITED-DSP",
+    "307B": "LIYANAGE LIMITED-DSP",
+    "308": "Goose",
+    "308A": "Goose",
+    "308B": "Goose",
+    "308C": "Goose",
+    "308D": "Goose",
     "404A": "Feng",
     "501C": "PANDA",
     "406": "Feng",

@@ -29,9 +29,18 @@ class BuildMessagePackTests(unittest.TestCase):
             with self.assertRaisesRegex(FileNotFoundError, "Report workbook not found"):
                 build_message_pack.resolve_report_file(missing)
 
-    def test_goose_keeps_all_routes_separate(self):
+    def test_goose_groups_308_family_and_keeps_other_routes_separate(self):
         group = pd.DataFrame(
-            [["407", 51, "Goose"], ["408", 39, "Goose"], ["408A", 0, "Goose"]],
+            [
+                ["308", 14, "Goose"],
+                ["308 A", 11, "Goose"],
+                ["308 B", 19, "Goose"],
+                ["308 C", 13, "Goose"],
+                ["308 D", 24, "Goose"],
+                ["407", 51, "Goose"],
+                ["408", 39, "Goose"],
+                ["408A", 0, "Goose"],
+            ],
             columns=["route_code", "quantity", "supplier"],
         )
 
@@ -39,9 +48,18 @@ class BuildMessagePackTests(unittest.TestCase):
 
         self.assertEqual(
             rows,
-            [["407", 51, "Goose"], ["408", 39, "Goose"], ["408A", 0, "Goose"]],
+            [
+                [
+                    "308 / 308A / 308B / 308C / 308D",
+                    "14 / 11 / 19 / 13 / 24 (81)",
+                    "Goose",
+                ],
+                ["407", 51, "Goose"],
+                ["408", 39, "Goose"],
+                ["408A", 0, "Goose"],
+            ],
         )
-        self.assertEqual(total, 90)
+        self.assertEqual(total, 171)
 
     def test_panda_keeps_routes_separate(self):
         group = pd.DataFrame(
@@ -182,37 +200,34 @@ class BuildMessagePackTests(unittest.TestCase):
         )
         self.assertEqual(total, 264)
 
-    def test_fast_rabbit_groups_keep_304_separate(self):
+    def test_liyanage_groups_307_family_and_keeps_304_separate(self):
         group = pd.DataFrame(
             [
-                ["304", 34, "Fast Rabbit"],
-                ["307", 11, "Fast Rabbit"],
-                ["307 A", 35, "Fast Rabbit"],
-                ["307 B", 15, "Fast Rabbit"],
-                ["308", 14, "Fast Rabbit"],
-                ["308 A", 11, "Fast Rabbit"],
-                ["308 B", 19, "Fast Rabbit"],
-                ["308 C", 13, "Fast Rabbit"],
-                ["308 D", 24, "Fast Rabbit"],
+                ["304", 34, "LIYANAGE LIMITED-DSP"],
+                ["307", 11, "LIYANAGE LIMITED-DSP"],
+                ["307 A", 35, "LIYANAGE LIMITED-DSP"],
+                ["307 B", 15, "LIYANAGE LIMITED-DSP"],
             ],
             columns=["route_code", "quantity", "supplier"],
         )
 
-        rows, total = build_message_pack.supplier_display_rows("Fast Rabbit", group)
+        rows, total = build_message_pack.supplier_display_rows(
+            "LIYANAGE LIMITED-DSP",
+            group,
+        )
 
         self.assertEqual(
             rows,
             [
-                ["304", 34, "Fast Rabbit"],
-                ["307 / 307A / 307B", "11 / 35 / 15 (61)", "Fast Rabbit"],
+                ["304", 34, "LIYANAGE LIMITED-DSP"],
                 [
-                    "308 / 308A / 308B / 308C / 308D",
-                    "14 / 11 / 19 / 13 / 24 (81)",
-                    "Fast Rabbit",
+                    "307 / 307A / 307B",
+                    "11 / 35 / 15 (61)",
+                    "LIYANAGE LIMITED-DSP",
                 ],
             ],
         )
-        self.assertEqual(total, 176)
+        self.assertEqual(total, 95)
 
     def test_empire_supplier_groups_show_detail_and_total(self):
         group = pd.DataFrame(
@@ -414,6 +429,7 @@ class BuildMessagePackTests(unittest.TestCase):
             "WGU",
             "GSB",
             "CHC",
+            "CHCV2",
             "DUD",
             "总计",
         ]
@@ -434,6 +450,7 @@ class BuildMessagePackTests(unittest.TestCase):
             12,
             13,
             14,
+            15,
         ]
         for index, station in enumerate(stations):
             frame.iloc[header_4l_row + 1 + index, 7:9] = [station, board_values[index]]
@@ -464,15 +481,10 @@ class BuildMessagePackTests(unittest.TestCase):
     def test_new_south_island_cities_get_route_images(self):
         self.assertEqual(
             build_message_pack.PROVINCE_STATIONS_BY_MESSAGE["CHC"],
-            ("CHC", "CHCV2", "CHRISTCHURCH"),
+            ("CHC", "CHRISTCHURCH"),
         )
+        self.assertEqual(build_message_pack.PROVINCE_STATIONS_BY_MESSAGE["CHCV2"], ("CHCV2",))
         self.assertEqual(build_message_pack.PROVINCE_STATIONS_BY_MESSAGE["DUD"], ("DUD", "DUNEDIN"))
-
-    def test_grouped_overview_count_keeps_the_breakdown_display(self):
-        self.assertEqual(
-            build_message_pack.clean_board_value("25/40(65)"),
-            "25/40(65)",
-        )
 
     def test_non_auckland_image_accepts_the_workbook_board_capacity(self):
         overview = pd.DataFrame(

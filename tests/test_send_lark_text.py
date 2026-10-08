@@ -50,6 +50,26 @@ class SendLarkTextTests(unittest.TestCase):
         self.assertEqual(codes, ["HST"])
         self.assertEqual(indexes, [0])
 
+    def test_chc_and_chcv2_destinations_do_not_match_each_other(self):
+        destinations = [
+            {"name": "CHC各线路预测"},
+            {"name": "CHCV2各线路预测"},
+        ]
+        cases = [
+            ("CHC", ["CHC"], [0]),
+            ("CHCV2", ["CHCV2"], [1]),
+            ("CHC / CHCV2", ["CHC", "CHCV2"], [0, 1]),
+        ]
+
+        for text, expected_codes, expected_indexes in cases:
+            with self.subTest(text=text):
+                codes, indexes = app_workflows.route_group_destination_indexes(
+                    destinations,
+                    text,
+                )
+                self.assertEqual(codes, expected_codes)
+                self.assertEqual(indexes, expected_indexes)
+
     def test_shared_route_names_select_each_real_group_once(self):
         destinations = [
             {"name": "TRG & RTR 各线路预测"},

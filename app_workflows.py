@@ -205,7 +205,13 @@ def route_group_destination_indexes(destinations, text):
         normalized_name = name.upper()
         if normalized_name.startswith("SEND AS ME "):
             continue
-        if any(code in normalized_name for code in requested_codes):
+        if any(
+            re.search(
+                rf"(?<![A-Z0-9]){re.escape(code)}(?![A-Z0-9])",
+                normalized_name,
+            )
+            for code in requested_codes
+        ):
             matched_indexes.append(index)
     return requested_codes, matched_indexes
 

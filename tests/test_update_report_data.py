@@ -54,7 +54,7 @@ class UpdateReportDataTests(unittest.TestCase):
         self.assertEqual(update_report_data.station_count(counts, "NPMV2"), 205)
         self.assertEqual(update_report_data.station_count(counts, "PMN"), 770)
 
-    def test_christchurch_overview_groups_chc_and_chcv2_with_a_total(self):
+    def test_christchurch_and_chcv2_are_counted_separately(self):
         counts = Counter({"CHC": 25, "CHCV2": 40})
 
         self.assertEqual(
@@ -63,11 +63,15 @@ class UpdateReportDataTests(unittest.TestCase):
                 "CHC",
                 "Christchurch",
             ),
-            ("25/40(65)", 65),
+            (25, 25),
         )
         self.assertEqual(
-            update_report_data.station_display_total("25/40(65)"),
-            65,
+            update_report_data.station_overview_count(
+                counts,
+                "CHCV2",
+                "",
+            ),
+            (40, 40),
         )
 
     def test_auckland_route_counts_exclude_other_and_blank_stations(self):
@@ -140,6 +144,39 @@ class UpdateReportDataTests(unittest.TestCase):
         self.assertEqual(worksheet.cell(3, 3).value, 4)
         self.assertEqual(worksheet.cell(3, 7).value, "PANDA")
 
+    def test_304_307_and_308_route_families_move_to_their_new_suppliers(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "奥克兰"
+        expected_suppliers = [
+            ("304", "LIYANAGE LIMITED-DSP"),
+            ("307", "LIYANAGE LIMITED-DSP"),
+            ("307 A", "LIYANAGE LIMITED-DSP"),
+            ("307 B", "LIYANAGE LIMITED-DSP"),
+            ("308", "Goose"),
+            ("308 A", "Goose"),
+            ("308 B", "Goose"),
+            ("308 C", "Goose"),
+            ("308 D", "Goose"),
+        ]
+        route_counts = Counter()
+        for row, (route_code, _) in enumerate(expected_suppliers, start=3):
+            worksheet.cell(row, 1).value = route_code
+            worksheet.cell(row, 7).value = "Fast Rabbit"
+            route_counts[update_report_data.clean_route_code(route_code)] = row
+        worksheet.cell(3 + len(expected_suppliers), 1).value = "总计"
+
+        update_report_data.update_auckland_sheet(workbook, route_counts)
+
+        self.assertEqual(
+            [worksheet.cell(row, 7).value for row in range(3, 3 + len(expected_suppliers))],
+            [supplier for _, supplier in expected_suppliers],
+        )
+        self.assertEqual(
+            [worksheet.cell(row, 3).value for row in range(3, 3 + len(expected_suppliers))],
+            list(range(3, 3 + len(expected_suppliers))),
+        )
+
     def test_4l_board_forecast_uses_280_piece_capacity_and_migrates_legacy_header(self):
         workbook = Workbook()
         worksheet = workbook.active
@@ -157,6 +194,7 @@ class UpdateReportDataTests(unittest.TestCase):
             "WGU": 166,
             "GSB": 88,
             "CHC": 253,
+            "CHCV2": 71,
             "DUD": 53,
         }
         for row, (station, arrival) in enumerate(arrivals.items(), start=3):
@@ -181,35 +219,35 @@ class UpdateReportDataTests(unittest.TestCase):
         self.assertEqual(worksheet.cell(1, 8).value, 280)
         self.assertEqual(worksheet.cell(1, 9).value, "4L预测板数")
         self.assertEqual(
-            [worksheet.cell(row, 8).value for row in range(2, 13)],
-            ["HMT", "TRG/RTR", "TPO", "NPL/HST", "PMN", "WLTV2", "NPMV2", "WGU", "GSB", "CHC", "DUD"],
+            [worksheet.cell(row, 8).value for row in range(2, 14)],
+            ["HMT", "TRG/RTR", "TPO", "NPL/HST", "PMN", "WLTV2", "NPMV2", "WGU", "GSB", "CHC", "CHCV2", "DUD"],
         )
         self.assertEqual(
-            [worksheet.cell(row, 9).value for row in range(2, 13)],
-            [5.61, "4.25/1.57(5.82)", 0.72, "1.76/1.23(2.99)", 2.42, 5.62, 0.7, 0.59, 0.31, 0.9, 0.19],
+            [worksheet.cell(row, 9).value for row in range(2, 14)],
+            [5.61, "4.25/1.57(5.82)", 0.72, "1.76/1.23(2.99)", 2.42, 5.62, 0.7, 0.59, 0.31, 0.9, 0.25, 0.19],
         )
-        self.assertEqual(worksheet.cell(13, 8).value, "总计")
-        self.assertEqual(worksheet.cell(13, 9).value, 25.87)
+        self.assertEqual(worksheet.cell(14, 8).value, "总计")
+        self.assertEqual(worksheet.cell(14, 9).value, 26.12)
         self.assertEqual(
-            [worksheet.row_dimensions[row].height for row in range(2, 14)],
-            [18] * 12,
+            [worksheet.row_dimensions[row].height for row in range(2, 15)],
+            [18] * 13,
         )
-        self.assertIsNone(worksheet.cell(14, 8).value)
-        self.assertEqual(worksheet.cell(15, 8).value, 350)
-        self.assertEqual(worksheet.cell(15, 9).value, "5L预测板数")
+        self.assertIsNone(worksheet.cell(15, 8).value)
+        self.assertEqual(worksheet.cell(16, 8).value, 350)
+        self.assertEqual(worksheet.cell(16, 9).value, "5L预测板数")
         self.assertEqual(
-            [worksheet.cell(row, 8).value for row in range(16, 27)],
-            ["HMT", "TRG/RTR", "TPO", "NPL/HST", "PMN", "WLTV2", "NPMV2", "WGU", "GSB", "CHC", "DUD"],
+            [worksheet.cell(row, 8).value for row in range(17, 29)],
+            ["HMT", "TRG/RTR", "TPO", "NPL/HST", "PMN", "WLTV2", "NPMV2", "WGU", "GSB", "CHC", "CHCV2", "DUD"],
         )
         self.assertEqual(
-            [worksheet.cell(row, 9).value for row in range(16, 27)],
-            [4.49, "3.4/1.26(4.66)", 0.57, "1.41/0.99(2.4)", 1.94, 4.5, 0.56, 0.47, 0.25, 0.72, 0.15],
+            [worksheet.cell(row, 9).value for row in range(17, 29)],
+            [4.49, "3.4/1.26(4.66)", 0.57, "1.41/0.99(2.4)", 1.94, 4.5, 0.56, 0.47, 0.25, 0.72, 0.2, 0.15],
         )
-        self.assertEqual(worksheet.cell(27, 8).value, "总计")
-        self.assertEqual(worksheet.cell(27, 9).value, 20.71)
+        self.assertEqual(worksheet.cell(29, 8).value, "总计")
+        self.assertEqual(worksheet.cell(29, 9).value, 20.91)
         self.assertEqual(
-            [worksheet.row_dimensions[row].height for row in range(15, 28)],
-            [22.5] * 13,
+            [worksheet.row_dimensions[row].height for row in range(16, 30)],
+            [22.5] * 14,
         )
         self.assertEqual(
             update_report_data.BOARD_FORECAST_GROUPS,
@@ -224,6 +262,7 @@ class UpdateReportDataTests(unittest.TestCase):
                 ("WGU",),
                 ("GSB",),
                 ("CHC",),
+                ("CHCV2",),
                 ("DUD",),
             ],
         )
@@ -245,12 +284,15 @@ class UpdateReportDataTests(unittest.TestCase):
                 "WGU",
                 "GSB",
                 "CHC",
+                "CHCV2",
                 "DUD",
             ],
         )
         self.assertEqual(update_report_data.STATION_DISPLAY_ALIASES["CHC"], "Christchurch")
-        self.assertEqual(update_report_data.STATION_ALIASES["CHC"], ["CHC", "CHCV2", "Christchurch"])
-        self.assertEqual(update_report_data.STATION_OVERVIEW_LABELS["CHC"], "CHC/CHCV2")
+        self.assertEqual(update_report_data.STATION_ALIASES["CHC"], ["CHC", "Christchurch"])
+        self.assertEqual(update_report_data.STATION_ALIASES["CHCV2"], ["CHCV2"])
+        self.assertEqual(update_report_data.STATION_OVERVIEW_LABELS["CHC"], "CHC")
+        self.assertEqual(update_report_data.STATION_OVERVIEW_LABELS["CHCV2"], "CHCV2")
         self.assertEqual(update_report_data.STATION_DISPLAY_ALIASES["DUD"], "Dunedin")
 
     def test_new_stations_move_summary_below_the_expanded_overview(self):
@@ -315,8 +357,11 @@ class UpdateReportDataTests(unittest.TestCase):
             ],
         )
         chc_row = 3 + update_report_data.NON_AUCKLAND_STATIONS.index("CHC")
-        self.assertEqual(worksheet.cell(chc_row, 1).value, "CHC/CHCV2")
-        self.assertEqual(worksheet.cell(chc_row, 3).value, "253/71(324)")
+        chcv2_row = 3 + update_report_data.NON_AUCKLAND_STATIONS.index("CHCV2")
+        self.assertEqual(worksheet.cell(chc_row, 1).value, "CHC")
+        self.assertEqual(worksheet.cell(chc_row, 3).value, 253)
+        self.assertEqual(worksheet.cell(chcv2_row, 1).value, "CHCV2")
+        self.assertEqual(worksheet.cell(chcv2_row, 3).value, 71)
         self.assertEqual(worksheet.cell(total_row, 1).value, "总计")
         self.assertEqual(worksheet.cell(total_row, 3).value, 9149)
         self.assertEqual(worksheet.cell(summary_header_row, 1).value, "Aliexpress 单量")
