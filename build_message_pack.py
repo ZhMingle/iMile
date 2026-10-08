@@ -8,6 +8,7 @@ from openpyxl import load_workbook
 from PIL import Image, ImageDraw, ImageFont
 
 from report_config import (
+    AUCKLAND_ROUTE_SUPPLIERS,
     BOARD_4L_CAPACITY,
     BOARD_5L_CAPACITY,
     PROVINCE_STATIONS_BY_MESSAGE,
@@ -484,6 +485,12 @@ def resolve_report_file(report_file=None):
     return path
 
 
+def apply_supplier_overrides(rows):
+    overrides = rows["route_code"].map(AUCKLAND_ROUTE_SUPPLIERS)
+    rows["supplier"] = overrides.fillna(rows["supplier"])
+    return rows
+
+
 def build_supplier_messages(report_file):
     df = pd.read_excel(report_file, sheet_name="奥克兰", header=None, dtype=str).fillna("")
     rows = df.iloc[2:101, [0, 2, 6]].copy()
@@ -491,6 +498,7 @@ def build_supplier_messages(report_file):
     rows["route_code"] = rows["route_code"].map(clean_route_code)
     rows["supplier"] = rows["supplier"].map(clean_text)
     rows["quantity"] = rows["quantity"].map(clean_number)
+    rows = apply_supplier_overrides(rows)
     rows = rows[(rows["route_code"] != "") & (rows["supplier"] != "")]
 
     summary = []

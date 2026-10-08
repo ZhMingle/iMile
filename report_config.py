@@ -103,6 +103,26 @@ STATION_CODES_BY_OVERVIEW_LABEL = {
 PROVINCE_STATIONS_BY_MESSAGE = _message_station_groups()
 
 
+# Explicit route ownership overrides are shared by workbook updates and image
+# generation.  Applying them in both places keeps existing reports compatible
+# when a route moves to a different supplier.
+AUCKLAND_ROUTE_SUPPLIERS = {
+    "304": "LIYANAGE LIMITED-DSP",
+    "307": "LIYANAGE LIMITED-DSP",
+    "307A": "LIYANAGE LIMITED-DSP",
+    "307B": "LIYANAGE LIMITED-DSP",
+    "308": "Goose",
+    "308A": "Goose",
+    "308B": "Goose",
+    "308C": "Goose",
+    "308D": "Goose",
+    "404A": "Feng",
+    "501C": "PANDA",
+    "406": "Feng",
+    "601": "Good Day Removals Ltd",
+}
+
+
 # Supplier route groups are explicit business rules.  Never infer them from a
 # shared numeric prefix: related route codes can belong to different suppliers
 # or drivers (for example, 501C belongs to PANDA, not EMPIRE COURIER's 501 group).

@@ -29,6 +29,49 @@ class BuildMessagePackTests(unittest.TestCase):
             with self.assertRaisesRegex(FileNotFoundError, "Report workbook not found"):
                 build_message_pack.resolve_report_file(missing)
 
+    def test_stale_workbook_supplier_names_are_overridden_before_grouping(self):
+        frame = pd.DataFrame([[""] * 7 for _ in range(16)], dtype=object)
+        stale_rows = [
+            ("304", 4, ""),
+            ("307", 7, "Fast Rabbit"),
+            ("307 A", 3, "Fast Rabbit"),
+            ("307 B", 2, "Fast Rabbit"),
+            ("308", 8, "Fast Rabbit"),
+            ("308 A", 1, "Fast Rabbit"),
+            ("308 B", 2, "Fast Rabbit"),
+            ("308 C", 3, "Fast Rabbit"),
+            ("308 D", 4, "Fast Rabbit"),
+            ("407", 5, "Goose"),
+            ("408", 6, "Goose"),
+            ("408 A", 7, "Goose"),
+            ("205", 9, "SAFE"),
+        ]
+        for index, (route_code, quantity, supplier) in enumerate(stale_rows, start=2):
+            frame.iloc[index, [0, 2, 6]] = [route_code, quantity, supplier]
+
+        with (
+            mock.patch.object(build_message_pack.pd, "read_excel", return_value=frame),
+            mock.patch.object(build_message_pack, "render_table_image"),
+        ):
+            summary = build_message_pack.build_supplier_messages("stale-report.xlsx")
+
+        by_supplier = summary.set_index("supplier").to_dict(orient="index")
+        self.assertNotIn("Fast Rabbit", by_supplier)
+        self.assertEqual(
+            by_supplier["LIYANAGE LIMITED-DSP"],
+            {"routes": 4, "total": 16},
+        )
+        self.assertEqual(by_supplier["Goose"], {"routes": 8, "total": 36})
+        self.assertEqual(by_supplier["SAFE"], {"routes": 1, "total": 9})
+
+    def test_route_group_suppliers_agree_with_explicit_overrides(self):
+        for supplier, groups in build_message_pack.SUPPLIER_ROUTE_GROUPS.items():
+            for group in groups:
+                for route_code in group:
+                    override = build_message_pack.AUCKLAND_ROUTE_SUPPLIERS.get(route_code)
+                    if override is not None:
+                        self.assertEqual(override, supplier)
+
     def test_goose_groups_308_family_and_keeps_other_routes_separate(self):
         group = pd.DataFrame(
             [
