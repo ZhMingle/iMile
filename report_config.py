@@ -103,6 +103,15 @@ STATION_CODES_BY_OVERVIEW_LABEL = {
 PROVINCE_STATIONS_BY_MESSAGE = _message_station_groups()
 
 
+# Route-detail message ownership can differ from the delivery station recorded
+# in the source workbook.  Keep these overrides scoped to route images so the
+# station overview and board forecasts continue to follow the source station.
+PROVINCE_ROUTE_STATION_OVERRIDES = {
+    "CHC2": "CHC",
+    "CHC3": "CHC",
+}
+
+
 # Explicit route ownership overrides are shared by workbook updates and image
 # generation.  Applying them in both places keeps existing reports compatible
 # when a route moves to a different supplier.

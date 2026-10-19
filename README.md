@@ -266,6 +266,7 @@ AKL, HMT, TRG, WLTV2, NPL, PMN, TPO, RTR, WGR, HST, NPMV2, WGU, GSB, CHC, CHCV2,
 - 非 `AKL` 用于非奥克兰到件货量统计
 - 路由码、派件网点为空或站点代码未在配置中识别的运单不会分摊到任何网点，而是在当天总量中单独显示为“未分配”
 - `CHC` 与 `CHCV2` 作为两个独立网点，分别显示总览、板数预测和线路预测
+- 线路预测图片中，`CHC2`、`CHC3` 归入 `CHC`；其他 `CHCV2` 线路仍归入 `CHCV2`。此规则不改变按源网点统计的总览和板数
 - `商家编号` 用于区分 TEMU、菜鸟、顺友等渠道；菜鸟相关统计按菜鸟商家编号计算，不再按运单号 `36` 开头猜测
 
 非奥克兰城市统一维护在 `report_config.py` 的 `NON_AUCKLAND_STATION_SPECS`。新增一个独立城市时，通常只需在那里增加一条站点配置；日报行、4L/5L 预测板数、线路预测图片和桌面助手线路识别会自动同步，不再分别修改多个脚本。
@@ -745,6 +746,7 @@ Rules:
 - Non-`AKL` rows are used for non-Auckland inbound statistics
 - Rows with a blank route, blank delivery station, or an unrecognized station code are not allocated to any station; they appear once as **Unassigned** in the daily total
 - `CHC` and `CHCV2` are reported as separate stations in the overview, board forecasts, and route forecasts
+- In route-forecast images, `CHC2` and `CHC3` belong to `CHC`; other `CHCV2` routes remain under `CHCV2`. This does not change source-station overview or board totals
 - `商家编号` / merchant ID is used to distinguish TEMU, Cainiao, Sunyou, and other channels. Cainiao-related metrics are calculated by Cainiao merchant ID, no longer by guessing from waybill numbers starting with `36`.
 
 Non-Auckland cities are defined once in `NON_AUCKLAND_STATION_SPECS` in `report_config.py`. Adding a standalone city there automatically updates the workbook rows, 4L/5L forecasts, route-detail image generation, and desktop route matching.

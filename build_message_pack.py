@@ -11,6 +11,7 @@ from report_config import (
     AUCKLAND_ROUTE_SUPPLIERS,
     BOARD_4L_CAPACITY,
     BOARD_5L_CAPACITY,
+    PROVINCE_ROUTE_STATION_OVERRIDES,
     PROVINCE_STATIONS_BY_MESSAGE,
     SUPPLIER_ROUTE_GROUPS,
 )
@@ -574,16 +575,23 @@ def build_non_auckland_messages(report_file):
 
 def build_route_detail_messages(report_file):
     wb = load_workbook(report_file, data_only=False, read_only=True)
-    source_ws = wb["数据源1-预测"]
-    route_counts_by_station = {}
-    for route_code, station in source_ws.iter_rows(
-        min_row=2, min_col=2, max_col=3, values_only=True
-    ):
-        route_code = clean_route_code(route_code)
-        station = clean_text(station).upper()
-        if route_code and station:
-            station_counts = route_counts_by_station.setdefault(station, {})
-            station_counts[route_code] = station_counts.get(route_code, 0) + 1
+    try:
+        source_ws = wb["数据源1-预测"]
+        route_counts_by_station = {}
+        for route_code, station in source_ws.iter_rows(
+            min_row=2, min_col=2, max_col=3, values_only=True
+        ):
+            route_code = clean_route_code(route_code)
+            station = clean_text(station).upper()
+            if route_code and station:
+                station = PROVINCE_ROUTE_STATION_OVERRIDES.get(
+                    route_code.upper(),
+                    station,
+                )
+                station_counts = route_counts_by_station.setdefault(station, {})
+                station_counts[route_code] = station_counts.get(route_code, 0) + 1
+    finally:
+        wb.close()
 
     details_by_name = {}
 

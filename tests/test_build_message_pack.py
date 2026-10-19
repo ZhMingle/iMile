@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 
 import pandas as pd
+from openpyxl import Workbook
 
 import build_message_pack
 
@@ -528,6 +529,37 @@ class BuildMessagePackTests(unittest.TestCase):
         )
         self.assertEqual(build_message_pack.PROVINCE_STATIONS_BY_MESSAGE["CHCV2"], ("CHCV2",))
         self.assertEqual(build_message_pack.PROVINCE_STATIONS_BY_MESSAGE["DUD"], ("DUD", "DUNEDIN"))
+
+    def test_chc2_and_chc3_route_images_move_from_chcv2_to_chc(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "数据源1-预测"
+        worksheet.append(["运单号", "路由码", "派件网点简码"])
+        for index, route_code in enumerate(
+            ["CHC2", "CHC2", "CHC3", "CHC4", "CHC5", "CHC6"],
+            start=1,
+        ):
+            worksheet.append([str(index), route_code, "CHCV2"])
+
+        rendered = {}
+
+        def capture(path, title, detail):
+            rendered[path.name] = detail.copy()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            report_file = Path(temp_dir) / "report.xlsx"
+            workbook.save(report_file)
+            with mock.patch.object(
+                build_message_pack,
+                "render_route_image",
+                side_effect=capture,
+            ):
+                build_message_pack.build_route_detail_messages(report_file)
+
+        chc = rendered["CHC各线路预测.png"].set_index("route_code")["quantity"].to_dict()
+        chcv2 = rendered["CHCV2各线路预测.png"].set_index("route_code")["quantity"].to_dict()
+        self.assertEqual(chc, {"CHC2": 2, "CHC3": 1})
+        self.assertEqual(chcv2, {"CHC4": 1, "CHC5": 1, "CHC6": 1})
 
     def test_non_auckland_image_accepts_the_workbook_board_capacity(self):
         overview = pd.DataFrame(
