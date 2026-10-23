@@ -1,5 +1,7 @@
 BOARD_4L_CAPACITY = 280
 BOARD_5L_CAPACITY = 350
+NORTH_ISLAND = "north"
+SOUTH_ISLAND = "south"
 
 
 # One authoritative list drives the non-Auckland workbook rows, board forecast
@@ -40,12 +42,14 @@ NON_AUCKLAND_STATION_SPECS = [
         "code": "CHC",
         "display": "Christchurch",
         "aliases": ("Christchurch",),
+        "island": SOUTH_ISLAND,
     },
-    {"code": "CHCV2"},
+    {"code": "CHCV2", "island": SOUTH_ISLAND},
     {
         "code": "DUD",
         "display": "Dunedin",
         "aliases": ("Dunedin",),
+        "island": SOUTH_ISLAND,
     },
 ]
 
@@ -74,6 +78,10 @@ def _message_station_groups():
 
 
 NON_AUCKLAND_STATIONS = [spec["code"] for spec in NON_AUCKLAND_STATION_SPECS]
+STATION_ISLANDS = {
+    spec["code"]: spec.get("island", NORTH_ISLAND)
+    for spec in NON_AUCKLAND_STATION_SPECS
+}
 BOARD_FORECAST_GROUPS = _ordered_groups("forecast_group")
 STATION_ALIASES = {
     spec["code"]: [spec["code"], *spec.get("aliases", ())]

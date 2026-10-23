@@ -449,6 +449,68 @@ class BuildMessagePackTests(unittest.TestCase):
             (8238, 4790, 0, 3448),
         )
 
+    def test_nested_island_breakdown_does_not_treat_north_as_unassigned(self):
+        self.assertEqual(
+            build_message_pack.parse_total_breakdown(
+                "8430(4092+4338(3131+1207))",
+                province_count=4338,
+            ),
+            (8430, 4092, 4338, 0),
+        )
+        self.assertEqual(
+            build_message_pack.parse_total_breakdown(
+                "16419(7268+9149(8772+377)+2)",
+                province_count=9149,
+            ),
+            (16419, 7268, 9149, 2),
+        )
+
+    def test_island_totals_support_the_legacy_grouped_south_island_row(self):
+        overview = pd.DataFrame(
+            [
+                ["HMT", 3131, 0, 0],
+                ["CHC/CHCV2", "443/562(1005)", 0, 0],
+                ["DUD", 202, 0, 0],
+                ["总计", 4338, 0, 0],
+            ],
+            columns=["station", "arrival_volume", "cainiao_volume", "sunyou_volume"],
+        )
+
+        self.assertEqual(
+            build_message_pack.province_island_totals(overview, 4338),
+            (3131, 1207),
+        )
+
+    def test_non_auckland_builder_passes_island_totals_to_the_renderer(self):
+        frame = pd.DataFrame([[""] * 9 for _ in range(8)], dtype=object)
+        frame.iloc[2, [0, 2, 5, 6]] = ["HMT", 3131, 0, 0]
+        frame.iloc[3, [0, 2, 5, 6]] = ["CHC/CHCV2", "443/562(1005)", 0, 0]
+        frame.iloc[4, [0, 2, 5, 6]] = ["DUD", 202, 0, 0]
+        frame.iloc[5, [0, 2, 5, 6]] = ["总计", 4338, 0, 0]
+        frame.iloc[6, 0] = "Aliexpress 单量"
+        frame.iloc[6, 2] = "顺友单量"
+        frame.iloc[7, 0] = 2371
+        frame.iloc[7, 2] = 1850
+        frame.iloc[7, 5] = "8430(4092+4338(3131+1207))"
+        boards = pd.DataFrame(
+            [["总计", 0]],
+            columns=["station", "boards"],
+        )
+
+        with (
+            mock.patch.object(build_message_pack.pd, "read_excel", return_value=frame),
+            mock.patch.object(
+                build_message_pack,
+                "extract_board_forecast_table",
+                side_effect=[(boards, 280), (boards, 350)],
+            ),
+            mock.patch.object(build_message_pack, "render_non_auckland_overview") as render,
+        ):
+            build_message_pack.build_non_auckland_messages("report.xlsx")
+
+        args = render.call_args.args
+        self.assertEqual(args[8:14], (8430, 4092, 4338, 3131, 1207, 0))
+
     def test_non_auckland_summary_rows_follow_the_expanded_station_table(self):
         frame = pd.DataFrame([[""] * 7 for _ in range(18)])
         frame.iloc[14, 0] = "总计"
@@ -593,6 +655,8 @@ class BuildMessagePackTests(unittest.TestCase):
                 0,
                 0,
                 0,
+                0,
+                0,
             )
         finally:
             build_message_pack.draw_centered_text = original
@@ -651,10 +715,56 @@ class BuildMessagePackTests(unittest.TestCase):
             0,
             0,
             0,
+            0,
+            0,
         )
 
         with build_message_pack.Image.open(self.temp_path) as image:
             self.assertEqual(image.height, build_message_pack.px(872))
+
+    def test_non_auckland_image_labels_the_province_island_breakdown(self):
+        overview = pd.DataFrame(
+            [["总计", 4338, 0, 0]],
+            columns=["station", "arrival_volume", "cainiao_volume", "sunyou_volume"],
+        )
+        boards = pd.DataFrame(
+            [["总计", 0]],
+            columns=["station", "boards"],
+        )
+        fitted_text = []
+
+        def capture(*args, **kwargs):
+            fitted_text.append(args[2])
+
+        with mock.patch.object(
+            build_message_pack,
+            "draw_centered_fit_text",
+            side_effect=capture,
+        ):
+            build_message_pack.render_non_auckland_overview(
+                self.temp_path,
+                overview,
+                boards,
+                boards,
+                280,
+                350,
+                2371,
+                1850,
+                8430,
+                4092,
+                4338,
+                3131,
+                1207,
+                0,
+            )
+
+        self.assertEqual(
+            fitted_text,
+            [
+                "当天总量（奥克兰 + 外省（北岛 + 南岛））",
+                "8430（4092 + 4338（3131 + 1207））",
+            ],
+        )
 
     def setUp(self):
         self.temp_path = build_message_pack.OUTPUT_DIR / "test_board_capacity.png"

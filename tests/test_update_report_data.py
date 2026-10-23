@@ -100,9 +100,9 @@ class UpdateReportDataTests(unittest.TestCase):
 
         self.assertEqual(
             worksheet.cell(13, 6).value,
-            "当天总量（奥克兰 + 外省 + 未分配）",
+            "当天总量（奥克兰 + 外省（北岛 + 南岛） + 未分配）",
         )
-        self.assertEqual(worksheet.cell(14, 6).value, "8238(4790+0+3448)")
+        self.assertEqual(worksheet.cell(14, 6).value, "8238(4790+0(0+0)+3448)")
 
     def test_clean_route_code_normalizes_excel_integer_decimals(self):
         self.assertEqual(update_report_data.clean_route_code("306.0"), "306")
@@ -294,6 +294,18 @@ class UpdateReportDataTests(unittest.TestCase):
         self.assertEqual(update_report_data.STATION_OVERVIEW_LABELS["CHC"], "CHC")
         self.assertEqual(update_report_data.STATION_OVERVIEW_LABELS["CHCV2"], "CHCV2")
         self.assertEqual(update_report_data.STATION_DISPLAY_ALIASES["DUD"], "Dunedin")
+        self.assertEqual(
+            {
+                station
+                for station, island in update_report_data.STATION_ISLANDS.items()
+                if island == update_report_data.SOUTH_ISLAND
+            },
+            {"CHC", "CHCV2", "DUD"},
+        )
+        self.assertEqual(
+            set(update_report_data.STATION_ISLANDS.values()),
+            {"north", "south"},
+        )
 
     def test_new_stations_move_summary_below_the_expanded_overview(self):
         workbook = Workbook()
@@ -370,9 +382,12 @@ class UpdateReportDataTests(unittest.TestCase):
         self.assertEqual(worksheet.cell(summary_value_row, 1).number_format, "0")
         self.assertEqual(
             worksheet.cell(summary_header_row, 6).value,
-            "当天总量（奥克兰 + 外省 + 未分配）",
+            "当天总量（奥克兰 + 外省（北岛 + 南岛） + 未分配）",
         )
-        self.assertEqual(worksheet.cell(summary_value_row, 6).value, "16419(7268+9149+2)")
+        self.assertEqual(
+            worksheet.cell(summary_value_row, 6).value,
+            "16419(7268+9149(8772+377)+2)",
+        )
         self.assertEqual(worksheet.cell(1, 8).value, 280)
         self.assertEqual(worksheet.cell(1, 9).value, "4L预测板数")
         _, rows_4l, total_4l_row, header_5l_row, rows_5l, total_5l_row = (

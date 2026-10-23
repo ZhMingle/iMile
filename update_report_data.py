@@ -17,9 +17,11 @@ from report_config import (
     BOARD_5L_CAPACITY,
     BOARD_FORECAST_GROUPS,
     NON_AUCKLAND_STATIONS,
+    SOUTH_ISLAND,
     STATION_ALIASES,
     STATION_CODES_BY_OVERVIEW_LABEL,
     STATION_DISPLAY_ALIASES,
+    STATION_ISLANDS,
     STATION_OVERVIEW_GROUPS,
     STATION_OVERVIEW_LABELS,
 )
@@ -624,6 +626,12 @@ def update_non_auckland_sheet(
         ws.cell(row, 7).value = sunyou
 
     non_auckland_total = sum(arrival_by_station.values())
+    south_island_total = sum(
+        count
+        for station, count in arrival_by_station.items()
+        if STATION_ISLANDS[station] == SOUTH_ISLAND
+    )
+    north_island_total = non_auckland_total - south_island_total
     cainiao_total = sum(cainiao_by_station.values())
     sunyou_total = sum(sunyou_by_station.values())
 
@@ -640,6 +648,8 @@ def update_non_auckland_sheet(
         auckland_total,
         non_auckland_total,
         source_total,
+        north_island_total,
+        south_island_total,
         summary_header_row=summary_header_row,
         summary_value_row=summary_value_row,
     )
@@ -654,9 +664,16 @@ def write_total_breakdown(
     auckland_total,
     non_auckland_total,
     source_total=None,
+    north_island_total=0,
+    south_island_total=0,
     summary_header_row=13,
     summary_value_row=14,
 ):
+    if north_island_total + south_island_total != non_auckland_total:
+        raise ValueError(
+            "North Island and South Island totals must equal the non-Auckland total."
+        )
+
     classified_total = auckland_total + non_auckland_total
     total = classified_total if source_total is None else source_total
     unassigned_total = total - classified_total
@@ -709,14 +726,17 @@ def write_total_breakdown(
     header_cell = ws.cell(summary_header_row, 6)
     value_cell = ws.cell(summary_value_row, 6)
     if unassigned_total:
-        header_cell.value = "当天总量（奥克兰 + 外省 + 未分配）"
+        header_cell.value = "当天总量（奥克兰 + 外省（北岛 + 南岛） + 未分配）"
         value_cell.value = (
             f"{total}({auckland_total}+{non_auckland_total}"
-            f"+{unassigned_total})"
+            f"({north_island_total}+{south_island_total})+{unassigned_total})"
         )
     else:
-        header_cell.value = "当天总量（奥克兰 + 外省）"
-        value_cell.value = f"{total}({auckland_total}+{non_auckland_total})"
+        header_cell.value = "当天总量（奥克兰 + 外省（北岛 + 南岛））"
+        value_cell.value = (
+            f"{total}({auckland_total}+{non_auckland_total}"
+            f"({north_island_total}+{south_island_total}))"
+        )
 
     for attr, style in header_style.items():
         setattr(header_cell, attr, copy(style))

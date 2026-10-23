@@ -11,8 +11,12 @@ from report_config import (
     AUCKLAND_ROUTE_SUPPLIERS,
     BOARD_4L_CAPACITY,
     BOARD_5L_CAPACITY,
+    NORTH_ISLAND,
     PROVINCE_ROUTE_STATION_OVERRIDES,
     PROVINCE_STATIONS_BY_MESSAGE,
+    SOUTH_ISLAND,
+    STATION_CODES_BY_OVERVIEW_LABEL,
+    STATION_ISLANDS,
     SUPPLIER_ROUTE_GROUPS,
 )
 
@@ -84,7 +88,9 @@ def clean_board_value(value):
 def parse_total_breakdown(value, province_count):
     text = clean_text(value)
     numbers = [clean_number(match) for match in re.findall(r"-?\d+(?:\.\d+)?", text)]
-    if len(numbers) >= 4:
+    if len(numbers) >= 6:
+        return numbers[0], numbers[1], numbers[2], numbers[-1]
+    if len(numbers) == 4:
         return numbers[0], numbers[1], numbers[2], numbers[3]
     if len(numbers) >= 3:
         unassigned_count = max(0, numbers[0] - numbers[1] - numbers[2])
@@ -92,6 +98,42 @@ def parse_total_breakdown(value, province_count):
     if len(numbers) == 1:
         return numbers[0], numbers[0] - province_count, province_count, 0
     return 0, 0, province_count, 0
+
+
+def station_display_total(value):
+    text = clean_text(value)
+    grouped_total = re.search(r"\((-?\d+(?:\.\d+)?)\)\s*$", text)
+    if grouped_total:
+        return clean_number(grouped_total.group(1))
+    return clean_number(value)
+
+
+def overview_station_is_south_island(value):
+    labels = [label.strip().upper() for label in clean_text(value).split("/")]
+    station_codes = [
+        STATION_CODES_BY_OVERVIEW_LABEL.get(label, label)
+        for label in labels
+        if label
+    ]
+    return bool(station_codes) and all(
+        STATION_ISLANDS.get(station, NORTH_ISLAND) == SOUTH_ISLAND
+        for station in station_codes
+    )
+
+
+def province_island_totals(overview, province_count):
+    north_island_total = sum(
+        station_display_total(row.arrival_volume)
+        for row in overview.itertuples(index=False)
+        if row.station != "总计" and not overview_station_is_south_island(row.station)
+    )
+    south_island_total = province_count - north_island_total
+    if south_island_total < 0:
+        raise ValueError(
+            "North Island volume exceeds the non-Auckland total; "
+            "the report island breakdown is inconsistent."
+        )
+    return north_island_total, south_island_total
 
 
 def non_auckland_summary_rows(df, total_row):
@@ -380,6 +422,8 @@ def render_non_auckland_overview(
     total_count,
     auckland_count,
     province_count,
+    north_island_count,
+    south_island_count,
     unassigned_count,
 ):
     cell_h = 36
@@ -442,16 +486,32 @@ def render_non_auckland_overview(
     if unassigned_count:
         total_display = (
             f"{total_count}（{auckland_count} + {province_count}"
+            f"（{north_island_count} + {south_island_count}）"
             f" + {unassigned_count}未分配）"
         )
-        total_header = "当天总量（奥克兰 + 外省 + 未分配）"
+        total_header = "当天总量（奥克兰 + 外省（北岛 + 南岛） + 未分配）"
     else:
-        total_display = f"{total_count}（{auckland_count} + {province_count}）"
-        total_header = "当天总量（奥克兰 + 外省）"
+        total_display = (
+            f"{total_count}（{auckland_count} + {province_count}"
+            f"（{north_island_count} + {south_island_count}））"
+        )
+        total_header = "当天总量（奥克兰 + 外省（北岛 + 南岛））"
     rect(draw, [total_x, y, total_x + total_width, y + header_h], fill="#FFC000", outline=BLACK, width=line_width())
-    draw_centered_text(draw, (total_x, y, total_x + total_width, y + header_h), total_header, FONT_HEADER)
+    draw_centered_fit_text(
+        draw,
+        (total_x, y, total_x + total_width, y + header_h),
+        total_header,
+        20,
+        bold=True,
+    )
     rect(draw, [total_x, y + header_h, total_x + total_width, y + header_h + total_value_h], fill="#FFC000", outline=BLACK, width=line_width())
-    draw_centered_text(draw, (total_x, y + header_h, total_x + total_width, y + header_h + total_value_h), total_display, FONT_TOTAL_NUMBER)
+    draw_centered_fit_text(
+        draw,
+        (total_x, y + header_h, total_x + total_width, y + header_h + total_value_h),
+        total_display,
+        24,
+        bold=True,
+    )
 
     def draw_board_table(x, y, title, data):
         rect(draw, [x, y, x + side_widths[0], y + header_h], fill=WHITE, outline=BLACK, width=line_width())
@@ -556,6 +616,10 @@ def build_non_auckland_messages(report_file):
             0,
             total_count - auckland_count - province_count,
         )
+    north_island_count, south_island_count = province_island_totals(
+        overview,
+        province_count,
+    )
 
     render_non_auckland_overview(
         PROVINCE_DIR / "非奥克兰总览.png",
@@ -569,6 +633,8 @@ def build_non_auckland_messages(report_file):
         total_count,
         auckland_count,
         province_count,
+        north_island_count,
+        south_island_count,
         unassigned_count,
     )
 
