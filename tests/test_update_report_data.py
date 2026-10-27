@@ -128,21 +128,25 @@ class UpdateReportDataTests(unittest.TestCase):
 
         self.assertEqual(worksheet.cell(3, 7).value, "Feng")
 
-    def test_501c_supplier_is_overridden_to_panda(self):
+    def test_501c_and_502a_suppliers_are_overridden_to_empire(self):
         workbook = Workbook()
         worksheet = workbook.active
         worksheet.title = "奥克兰"
         worksheet.cell(3, 1).value = "501 C"
-        worksheet.cell(3, 7).value = "EMPIRE COURIER"
-        worksheet.cell(4, 1).value = "总计"
+        worksheet.cell(3, 7).value = "PANDA"
+        worksheet.cell(4, 1).value = "502 A"
+        worksheet.cell(4, 7).value = "PANDA"
+        worksheet.cell(5, 1).value = "总计"
 
         update_report_data.update_auckland_sheet(
             workbook,
-            Counter({"501C": 4}),
+            Counter({"501C": 4, "502A": 36}),
         )
 
         self.assertEqual(worksheet.cell(3, 3).value, 4)
-        self.assertEqual(worksheet.cell(3, 7).value, "PANDA")
+        self.assertEqual(worksheet.cell(3, 7).value, "EMPIRE COURIER")
+        self.assertEqual(worksheet.cell(4, 3).value, 36)
+        self.assertEqual(worksheet.cell(4, 7).value, "EMPIRE COURIER")
 
     def test_304_307_and_308_route_families_move_to_their_new_suppliers(self):
         workbook = Workbook()

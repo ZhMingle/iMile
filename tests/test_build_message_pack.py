@@ -65,6 +65,23 @@ class BuildMessagePackTests(unittest.TestCase):
         self.assertEqual(by_supplier["Goose"], {"routes": 8, "total": 36})
         self.assertEqual(by_supplier["SAFE"], {"routes": 1, "total": 9})
 
+    def test_panda_501c_and_502a_are_reassigned_to_empire(self):
+        rows = pd.DataFrame(
+            [
+                ["501B", "PANDA"],
+                ["501C", "PANDA"],
+                ["502A", "PANDA"],
+            ],
+            columns=["route_code", "supplier"],
+        )
+
+        result = build_message_pack.apply_supplier_overrides(rows)
+
+        self.assertEqual(
+            result["supplier"].tolist(),
+            ["PANDA", "EMPIRE COURIER", "EMPIRE COURIER"],
+        )
+
     def test_route_group_suppliers_agree_with_explicit_overrides(self):
         for supplier, groups in build_message_pack.SUPPLIER_ROUTE_GROUPS.items():
             for group in groups:
@@ -105,14 +122,12 @@ class BuildMessagePackTests(unittest.TestCase):
         )
         self.assertEqual(total, 171)
 
-    def test_panda_keeps_routes_separate(self):
+    def test_panda_keeps_remaining_routes_separate(self):
         group = pd.DataFrame(
             [
                 ["402", 35, "PANDA"],
                 ["403", 35, "PANDA"],
                 ["501B", 118, "PANDA"],
-                ["501C", 4, "PANDA"],
-                ["502A", 36, "PANDA"],
             ],
             columns=["route_code", "quantity", "supplier"],
         )
@@ -125,11 +140,9 @@ class BuildMessagePackTests(unittest.TestCase):
                 ["402", 35, "PANDA"],
                 ["403", 35, "PANDA"],
                 ["501B", 118, "PANDA"],
-                ["501C", 4, "PANDA"],
-                ["502A", 36, "PANDA"],
             ],
         )
-        self.assertEqual(total, 228)
+        self.assertEqual(total, 188)
 
     def test_fast_donkey_keeps_309_and_309a_separate_and_preserves_zero_group(self):
         group = pd.DataFrame(
@@ -288,8 +301,10 @@ class BuildMessagePackTests(unittest.TestCase):
                 ["204 S", 6, "EMPIRE COURIER"],
                 ["501", 11, "EMPIRE COURIER"],
                 ["501 A", 9, "EMPIRE COURIER"],
+                ["501 C", 4, "EMPIRE COURIER"],
                 ["501 D", 24, "EMPIRE COURIER"],
                 ["502", 9, "EMPIRE COURIER"],
+                ["502 A", 36, "EMPIRE COURIER"],
                 ["502 B", 11, "EMPIRE COURIER"],
                 ["502 C", 35, "EMPIRE COURIER"],
                 ["504", 35, "EMPIRE COURIER"],
@@ -311,11 +326,15 @@ class BuildMessagePackTests(unittest.TestCase):
                 ["107 / 108", "32 / 25 (57)", "EMPIRE COURIER"],
                 ["204 / 204S", "15 / 6 (21)", "EMPIRE COURIER"],
                 [
-                    "501 / 501A / 501D",
-                    "11 / 9 / 24 (44)",
+                    "501 / 501A / 501C / 501D",
+                    "11 / 9 / 4 / 24 (48)",
                     "EMPIRE COURIER",
                 ],
-                ["502 / 502B / 502C", "9 / 11 / 35 (55)", "EMPIRE COURIER"],
+                [
+                    "502 / 502A / 502B / 502C",
+                    "9 / 36 / 11 / 35 (91)",
+                    "EMPIRE COURIER",
+                ],
                 [
                     "504 / 505 / 506 / 507 / 508",
                     "35 / 25 / 31 / 23 / 7 (121)",
@@ -323,9 +342,9 @@ class BuildMessagePackTests(unittest.TestCase):
                 ],
             ],
         )
-        self.assertEqual(total, 378)
+        self.assertEqual(total, 418)
 
-    def test_empire_group_does_not_pull_routes_from_panda(self):
+    def test_empire_group_keeps_501b_with_panda(self):
         empire = pd.DataFrame(
             [
                 ["101", 5, "EMPIRE COURIER"],
@@ -340,8 +359,10 @@ class BuildMessagePackTests(unittest.TestCase):
                 ["204S", 6, "EMPIRE COURIER"],
                 ["501", 11, "EMPIRE COURIER"],
                 ["501A", 9, "EMPIRE COURIER"],
+                ["501C", 4, "EMPIRE COURIER"],
                 ["501D", 24, "EMPIRE COURIER"],
                 ["502", 9, "EMPIRE COURIER"],
+                ["502A", 36, "EMPIRE COURIER"],
                 ["502B", 11, "EMPIRE COURIER"],
                 ["502C", 35, "EMPIRE COURIER"],
                 ["504", 35, "EMPIRE COURIER"],
@@ -355,8 +376,6 @@ class BuildMessagePackTests(unittest.TestCase):
         panda = pd.DataFrame(
             [
                 ["501B", 118, "PANDA"],
-                ["501C", 4, "PANDA"],
-                ["502A", 36, "PANDA"],
             ],
             columns=["route_code", "quantity", "supplier"],
         )
@@ -366,13 +385,12 @@ class BuildMessagePackTests(unittest.TestCase):
 
         empire_text = " ".join(str(value) for row in empire_rows for value in row)
         self.assertNotIn("501B", empire_text)
-        self.assertNotIn("501C", empire_text)
+        self.assertIn("501C", empire_text)
+        self.assertIn("502A", empire_text)
         self.assertEqual(
             panda_rows,
             [
                 ["501B", 118, "PANDA"],
-                ["501C", 4, "PANDA"],
-                ["502A", 36, "PANDA"],
             ],
         )
 
@@ -391,8 +409,10 @@ class BuildMessagePackTests(unittest.TestCase):
                 ["204S", 6, "EMPIRE COURIER"],
                 ["501", 11, "EMPIRE COURIER"],
                 ["501A", 9, "EMPIRE COURIER"],
+                ["501C", 4, "EMPIRE COURIER"],
                 ["501D", 24, "EMPIRE COURIER"],
                 ["502", 9, "EMPIRE COURIER"],
+                ["502A", 36, "EMPIRE COURIER"],
                 ["502B", 11, "EMPIRE COURIER"],
                 ["502C", 35, "EMPIRE COURIER"],
                 ["504", 35, "EMPIRE COURIER"],
@@ -415,7 +435,7 @@ class BuildMessagePackTests(unittest.TestCase):
         self.assertEqual(kwargs["widths"], [300, 340, 260])
         self.assertEqual(kwargs["fit_body_columns"], (0, 1))
         self.assertFalse(kwargs["hide_total_label"])
-        self.assertEqual(kwargs["rows"][-1], ["Total", 378, "EMPIRE COURIER"])
+        self.assertEqual(kwargs["rows"][-1], ["Total", 418, "EMPIRE COURIER"])
 
     def test_ungrouped_supplier_keeps_original_layout(self):
         group = pd.DataFrame(
