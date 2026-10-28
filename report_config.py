@@ -134,8 +134,8 @@ AUCKLAND_ROUTE_SUPPLIERS = {
     "308C": "Goose",
     "308D": "Goose",
     "404A": "Feng",
-    "501C": "EMPIRE COURIER",
-    "502A": "EMPIRE COURIER",
+    "501C": "PANDA",
+    "502A": "PANDA",
     "406": "Feng",
     "601": "Good Day Removals Ltd",
 }
@@ -143,15 +143,16 @@ AUCKLAND_ROUTE_SUPPLIERS = {
 
 # Supplier route groups are explicit business rules.  Never infer them from a
 # shared numeric prefix: related route codes can belong to different suppliers
-# or drivers (for example, 501B belongs to PANDA, not EMPIRE COURIER's 501 group).
+# or drivers (for example, 501C and 502A belong to PANDA, outside EMPIRE
+# COURIER's 501 and 502 groups).
 SUPPLIER_ROUTE_GROUPS = {
     "EMPIRE COURIER": [
         ("101", "102", "103"),
         ("104", "105", "106"),
         ("107", "108"),
         ("204", "204S"),
-        ("501", "501A", "501C", "501D"),
-        ("502", "502A", "502B", "502C"),
+        ("501", "501A", "501D"),
+        ("502", "502B", "502C"),
         ("504", "505", "506", "507", "508"),
     ],
     "LIYANAGE LIMITED-DSP": [
